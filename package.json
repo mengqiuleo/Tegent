@@ -1,0 +1,22 @@
+{
+  "name": "tegent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "pnpm --filter @tegent/core build && pnpm --filter @tegent/cli run dev",
+    "build": "pnpm -r build",
+    "clean": "pnpm -r clean",
+    "start": "pnpm --filter @tegent/cli start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.33.1",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}
