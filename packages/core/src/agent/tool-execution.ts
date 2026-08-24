@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -5,7 +6,8 @@ import type { LanguageModel } from 'ai'
 
 import type { LoopState } from './loop-state.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
-import { runShellCommand, truncateToolResult } from './tools.js'
+import { truncateToolResult } from './tools.js'
+import { clearProgressReporter, reportProgress } from './tools/progress.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 
 type ToolCall = {
@@ -23,6 +25,7 @@ function pushToolResult(
   isError = false,
 ): void {
   state.messages.push(toolResultMessage(toolCallId, toolName, output))
+  clearProgressReporter(toolCallId)
   callbacks.onToolResult(toolCallId, output, isError)
 }
 
@@ -50,10 +53,75 @@ function countOccurrences(content: string, search: string): number {
   return count
 }
 
-async function executeWriteTool(toolName: string, input: Record<string, unknown>): Promise<string> {
+async function runShellCommand(
+  command: string,
+  timeout = 30_000,
+  callbacks?: Pick<AgentCallbacks, 'onShellOutput'>,
+  toolCallId?: string,
+  signal?: AbortSignal,
+): Promise<{ output: string; isError: boolean }> {
+  return await new Promise((resolve) => {
+    const proc = spawn(command, {
+      shell: true,
+      cwd: process.cwd(),
+      env: process.env,
+      signal,
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const finish = (output: string, isError: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ output: truncateToolResult(output), isError })
+    }
+
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stdout += text
+      callbacks?.onShellOutput(text)
+      if (toolCallId) reportProgress(toolCallId, text.trim().split(/\r?\n/).at(-1) ?? 'Running command...')
+    })
+
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stderr += text
+      callbacks?.onShellOutput(text)
+      if (toolCallId) reportProgress(toolCallId, text.trim().split(/\r?\n/).at(-1) ?? 'Running command...')
+    })
+
+    timer = setTimeout(() => {
+      timedOut = true
+      proc.kill()
+    }, timeout)
+
+    proc.on('error', (err) => finish(err.message || 'Command failed', true))
+
+    proc.on('close', (code) => {
+      const combined = [stdout, stderr].filter(Boolean).join('\n').trim()
+      if (timedOut) {
+        finish(`${combined}\nCommand timed out after ${timeout}ms`.trim(), true)
+        return
+      }
+      if (code !== 0) {
+        finish(combined ? `${combined}\nExit code ${code}` : `Exit code ${code}`, true)
+        return
+      }
+      finish(combined || 'Done', false)
+    })
+  })
+}
+
+async function executeWriteTool(toolName: string, input: Record<string, unknown>, toolCallId: string): Promise<string> {
   if (toolName === 'writeFile') {
     const filePath = input.filePath as string
     const content = input.content as string
+    reportProgress(toolCallId, `Writing ${filePath}`)
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, content, 'utf-8')
     return `File written: ${filePath}`
@@ -64,6 +132,7 @@ async function executeWriteTool(toolName: string, input: Record<string, unknown>
     const oldString = input.oldString as string
     const newString = input.newString as string
     const replaceAll = Boolean(input.replaceAll)
+    reportProgress(toolCallId, `Editing ${filePath}`)
     const content = await fs.readFile(filePath, 'utf-8')
 
     if (!replaceAll) {
@@ -78,6 +147,41 @@ async function executeWriteTool(toolName: string, input: Record<string, unknown>
   }
 
   return toolErrorString(`No manual executor for ${toolName}`)
+}
+
+async function executeBypassTool(
+  tc: ToolCall,
+  state: LoopState,
+  options: AgentOptions,
+  callbacks: AgentCallbacks,
+): Promise<boolean> {
+  if (tc.toolName === 'askUser') {
+    const question = tc.input.question as string
+    const choices = tc.input.options as Array<{ label: string; description: string }> | undefined
+    const answer = await callbacks.onAskUser(question, choices)
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, `User answered: ${answer}`)
+    return true
+  }
+
+  if (tc.toolName === 'todoWrite') {
+    state.todos = (tc.input.todos as typeof state.todos | undefined) ?? []
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, `Todo list updated: ${state.todos.length} items`)
+    return true
+  }
+
+  if (tc.toolName === 'enterPlanMode') {
+    state.permissionMode = 'plan'
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Entered plan mode.')
+    return true
+  }
+
+  if (tc.toolName === 'exitPlanMode') {
+    state.permissionMode = 'default'
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Exited plan mode.')
+    return true
+  }
+
+  return false
 }
 
 async function askPermission(
@@ -106,8 +210,10 @@ async function handleToolCall(
   }
 
   try {
+    if (await executeBypassTool(tc, state, options, callbacks)) return
+
     if (tc.toolName === 'writeFile' || tc.toolName === 'edit') {
-      const output = await executeWriteTool(tc.toolName, tc.input)
+      const output = await executeWriteTool(tc.toolName, tc.input, tc.toolCallId)
       const isError = isToolErrorString(output)
       if (!isError) state.filesModified.add(tc.input.filePath as string)
       pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, truncateToolResult(output), isError)
@@ -117,9 +223,8 @@ async function handleToolCall(
     if (tc.toolName === 'shell') {
       const command = tc.input.command as string
       const timeout = (tc.input.timeout as number | undefined) ?? 30_000
-      callbacks.onToolProgress(tc.toolCallId, `Running ${command}`)
-      const result = await runShellCommand(command, timeout)
-      callbacks.onShellOutput(result.output)
+      reportProgress(tc.toolCallId, 'Running command...')
+      const result = await runShellCommand(command, timeout, callbacks, tc.toolCallId, options.abortSignal)
       pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, result.output, result.isError)
       return
     }

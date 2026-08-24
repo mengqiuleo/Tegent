@@ -1,5 +1,7 @@
 import type { LanguageModel } from 'ai'
 
+import type { z } from 'zod'
+
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
 
 export interface TokenUsage {
@@ -30,6 +32,7 @@ export interface AgentCallbacks {
   onToolCall: (toolCallId: string, toolName: string, input: Record<string, unknown>) => void
   onToolProgress: (toolCallId: string, message: string) => void
   onToolResult: (toolCallId: string, result: string, isError?: boolean) => void
+  onAskUser: (question: string, options?: Array<{ label: string; description: string }>) => Promise<string>
   onAskPermission: (toolCall: {
     toolCallId: string
     toolName: string
@@ -43,6 +46,13 @@ export interface AgentCallbacks {
   onMemoryWrite?: (notice: string) => void
 }
 
+export interface ToolFilter {
+  allow?: string[]
+  deny?: string[]
+}
+
+
+
 export interface AgentOptions {
   modelId: string
   trustMode: boolean
@@ -50,6 +60,7 @@ export interface AgentOptions {
   permissionMode?: PermissionMode
   systemPromptExtra?: string
   abortSignal?: AbortSignal
+  toolFilter?: ToolFilter
 }
 
 export type LanguageModelLike = LanguageModel
