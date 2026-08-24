@@ -1,8 +1,8 @@
 import fsSync from 'node:fs'
 import path from 'node:path'
 
-import { MODEL_ALIASES, PROVIDER_DETECTION_ORDER } from './types.js'
-import type { BuiltInProviderName, ModelId, ProviderName } from './types.js'
+import { MODEL_ALIASES, PROVIDER_DETECTION_ORDER } from '../types/index.js'
+import type { BuiltInProviderName, ModelId, ProviderName } from '../types/index.js'
 
 export const ENV_MAP: Record<BuiltInProviderName, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -52,7 +52,7 @@ export function loadUserConfig(): UserConfig {
       return parsed as UserConfig
     }
   } catch {
-    // Missing or malformed config is treated as "no persisted preference".
+
   }
   return {}
 }
@@ -63,7 +63,7 @@ export function saveUserConfig(update: Partial<UserConfig>): void {
     fsSync.mkdirSync(userXcodeDir(), { recursive: true })
     fsSync.writeFileSync(getUserConfigPath(), JSON.stringify(merged, null, 2) + '\n', 'utf-8')
   } catch {
-    // Best effort only: a read-only home directory should not crash the CLI.
+
   }
 }
 

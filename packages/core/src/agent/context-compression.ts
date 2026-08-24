@@ -1,7 +1,7 @@
 import type { LanguageModel, ModelMessage } from 'ai'
 
 import type { LoopState } from './loop-state.js'
-import type { AgentCallbacks } from './types.js'
+import type { AgentCallbacks } from '../types/index.js'
 
 function estimateTokens(messages: ModelMessage[]): number {
   const text = messages.map((m) => JSON.stringify(m)).join('\n')

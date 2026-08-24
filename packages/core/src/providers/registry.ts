@@ -10,11 +10,10 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createXai } from '@ai-sdk/xai'
 import { createProviderRegistry } from 'ai'
 
-import { getProviderOptions } from '../agent/config.js'
+import { getProviderOptions } from '../config/index.js'
 
 export function createModelRegistry() {
   const opts = getProviderOptions()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const providers: Record<string, any> = {}
 
   if (opts.anthropic) providers.anthropic = createAnthropic({ fetch: permanentErrorFetch })

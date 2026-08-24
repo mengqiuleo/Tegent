@@ -6,7 +6,7 @@ import type { LanguageModel } from 'ai'
 import type { LoopState } from './loop-state.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
 import { runShellCommand, truncateToolResult } from './tools.js'
-import type { AgentCallbacks, AgentOptions } from './types.js'
+import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 
 type ToolCall = {
   toolName: string

@@ -16,7 +16,7 @@ import { buildSystemPrompt } from './system-prompt.js'
 import { processToolCalls } from './tool-execution.js'
 import { repairOrphanToolCalls, truncateToolResultsInMessages } from './tool-result-sanitize.js'
 import { toolRegistry, truncateToolResult } from './tools.js'
-import type { AgentCallbacks, AgentOptions } from './types.js'
+import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 
 export type { LoopState } from './loop-state.js'
 

@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai'
 
-import type { CheckpointEntry, PermissionMode, TodoItem, TokenUsage } from './types.js'
+import type { CheckpointEntry, PermissionMode, TodoItem, TokenUsage } from '../types/index.js'
 
 export interface LoopState {
   messages: ModelMessage[]
