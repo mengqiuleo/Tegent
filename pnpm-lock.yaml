@@ -32,9 +32,22 @@ importers:
       '@ai-sdk/deepseek':
         specifier: ^1.0.0
         version: 1.0.51(zod@4.4.3)
+      '@ai-sdk/provider':
+        specifier: 4.0.7
+        version: 4.0.7
+      '@ai-sdk/provider-utils':
+        specifier: 5.0.29
+        version: 5.0.29(zod@4.4.3)
       ai:
         specifier: ^7.0.77
         version: 7.0.77(zod@4.4.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
 packages:
 
