@@ -16,10 +16,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ai-sdk/alibaba": "^2.0.34",
+    "@ai-sdk/anthropic": "^4.0.41",
     "@ai-sdk/deepseek": "^1.0.0",
+    "@ai-sdk/google": "^4.0.50",
+    "@ai-sdk/moonshotai": "^3.0.37",
+    "@ai-sdk/openai": "^4.0.46",
+    "@ai-sdk/openai-compatible": "^3.0.35",
     "@ai-sdk/provider": "4.0.7",
     "@ai-sdk/provider-utils": "5.0.29",
-    "ai": "^7.0.77"
+    "@ai-sdk/xai": "^4.0.43",
+    "ai": "^7.0.77",
+    "zhipu-ai-provider": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

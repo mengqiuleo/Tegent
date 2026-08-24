@@ -65,7 +65,12 @@ async function streamChunksToUI(result: StreamResult, callbacks: AgentCallbacks)
 }
 
 // 把一次请求的 response 和 usage 合并回会话状态。
-async function collectTurnResponse(result: StreamResult, state: LoopState, callbacks: AgentCallbacks): Promise<string> {
+async function collectTurnResponse(
+  result: StreamResult,
+  state: LoopState,
+  modelId: string,
+  callbacks: AgentCallbacks,
+): Promise<string> {
   const response = await result.response
 
   // 自动执行的只读工具会把结果塞进 response.messages，这里统一截断一下。
@@ -82,7 +87,7 @@ async function collectTurnResponse(result: StreamResult, state: LoopState, callb
     state.tokenUsage.currentContextTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
     state.lastInputTokens = usage.inputTokens ?? state.lastInputTokens
     callbacks.onUsageUpdate(state.tokenUsage)
-    void appendUsage(state, 'chapter-08-demo')
+    void appendUsage(state, modelId)
   }
 
   return await result.finishReason
@@ -150,7 +155,7 @@ async function runTurn(
   }
 
   try {
-    const finishReason = await collectTurnResponse(result, state, callbacks)
+    const finishReason = await collectTurnResponse(result, state, options.modelId, callbacks)
     return { kind: 'done', finishReason, result }
   } catch (err) {
     if (isAbortError(err, options.abortSignal)) return { kind: 'aborted' }
@@ -222,7 +227,7 @@ export async function agentLoop(
   while (options.maxTurns === undefined || turn < options.maxTurns) {
     turn++
 
-    // 把上一轮还没刷盘的消息先写掉，再检查上下文是否太大。
+    // 把上一轮还没刷的消息先写掉，再检查上下文是否太大。
     void flushPendingMessages(state)
     await checkAndCompressContext(state, model, compressionThreshold, callbacks)
 
