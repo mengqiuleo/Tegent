@@ -19,12 +19,12 @@ export interface UserConfig {
   model?: string
 }
 
-function userXcodeDir(): string {
-  return process.env.X_CODE_HOME ?? path.join(process.env.HOME ?? process.cwd(), '.x-code')
+function userTeCodeDir(): string {
+  return path.join(process.cwd(), '.te-code')
 }
 
 export function getUserConfigPath(): string {
-  return path.join(userXcodeDir(), 'config.json')
+  return path.join(userTeCodeDir(), 'config.json')
 }
 
 export function getApiKey(provider: string): string | undefined {
@@ -60,7 +60,7 @@ export function loadUserConfig(): UserConfig {
 export function saveUserConfig(update: Partial<UserConfig>): void {
   const merged: UserConfig = { ...loadUserConfig(), ...update }
   try {
-    fsSync.mkdirSync(userXcodeDir(), { recursive: true })
+    fsSync.mkdirSync(userTeCodeDir(), { recursive: true })
     fsSync.writeFileSync(getUserConfigPath(), JSON.stringify(merged, null, 2) + '\n', 'utf-8')
   } catch {
 
@@ -68,7 +68,7 @@ export function saveUserConfig(update: Partial<UserConfig>): void {
 }
 
 export function resolveModelId(input?: string): ModelId | null {
-  const explicit = input ?? loadUserConfig().model ?? process.env.X_CODE_MODEL
+  const explicit = input ?? loadUserConfig().model
   if (explicit) return (MODEL_ALIASES[explicit] ?? explicit) as ModelId
 
   for (const { envKey, defaultModel } of PROVIDER_DETECTION_ORDER) {
