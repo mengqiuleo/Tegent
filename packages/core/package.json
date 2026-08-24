@@ -17,6 +17,12 @@
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^1.0.0",
+    "@ai-sdk/provider": "4.0.7",
+    "@ai-sdk/provider-utils": "5.0.29",
     "ai": "^7.0.77"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "zod": "^4.4.3"
   }
 }
