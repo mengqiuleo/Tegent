@@ -20,6 +20,8 @@
     "start": "node bin/tegent.js"
   },
   "dependencies": {
-    "@tegent/core": "workspace:*"
+    "@tegent/core": "workspace:*",
+    "chalk": "^6.0.0",
+    "ink": "^7.1.1"
   }
 }
