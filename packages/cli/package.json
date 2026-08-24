@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
     "start": "node bin/tegent.js"
   },
