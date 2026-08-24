@@ -23,6 +23,7 @@
     "@tegent/core": "workspace:*",
     "chalk": "^6.0.0",
     "ink": "^7.1.1",
+    "marked": "^18.0.11",
     "react": "^19.2.8",
     "yargs": "^18.1.0"
   },

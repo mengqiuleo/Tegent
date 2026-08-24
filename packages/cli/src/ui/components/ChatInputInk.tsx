@@ -7,6 +7,8 @@ import { Box, Text, useInput, useStdin } from "ink";
 
 import type { DisplayMessage } from "../hooks/use-agent.js";
 
+import { Markdown } from "./Markdown.js";
+
 /** 最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
 const MAX_VISIBLE_MESSAGES = 30;
 
@@ -39,6 +41,18 @@ function MessageBlock({ msg }: { msg: DisplayMessage }) {
   const label = renderLabel(msg);
   const labelColor =
     msg.role === "user" ? "cyan" : msg.role === "tool" ? "gray" : undefined;
+
+  // assistant 输出是 Markdown，交给 Markdown 组件渲染；空内容（流式刚开始的占位）不渲染。
+  if (msg.role === "assistant") {
+    if (msg.content.trim().length === 0) return null;
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Text>{label}</Text>
+        <Markdown source={msg.content} />
+      </Box>
+    );
+  }
+
   const lines = msg.content.length > 0 ? msg.content.trimEnd().split("\n") : [];
 
   if (lines.length === 0) return null;
