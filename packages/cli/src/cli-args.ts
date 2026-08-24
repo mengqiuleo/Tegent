@@ -23,23 +23,6 @@ export async function parseCliArgs() {
       // 传入该值后会强制设置上限
       describe: 'Cap on agent loop iterations per submission (default: unlimited)',
     })
-    .option('plan', {
-      type: 'boolean',
-      default: false,
-      // 不设置短别名，因为 `-p` 已经留给 `--print`。
-      // Plan 模式会把模型限制在只读探索和计划文件产出中，直到用户批准后才允许编辑代码。
-      describe: 'Start the session in plan mode (read-only exploration; user must approve before code edits)',
-    })
-    .option('plugins', {
-      type: 'boolean',
-      default: true,
-      describe: 'Enable plugin discovery (default true). `--no-plugins` to disable for one session.',
-    })
-    .option('hooks', {
-      type: 'boolean',
-      default: true,
-      describe: 'Enable plugin hooks (default true). `--no-hooks` to skip hook execution for one session.',
-    })
     .help()
     .alias('h', 'help')
     .parse()
