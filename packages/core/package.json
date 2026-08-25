@@ -27,13 +27,17 @@
     "@ai-sdk/provider-utils": "5.0.29",
     "@ai-sdk/xai": "^4.0.43",
     "@tavily/core": "^0.7.8",
+    "@vscode/ripgrep": "^1.18.0",
     "ai": "^7.0.77",
+    "cheerio": "^1.2.0",
     "execa": "^10.0.1",
     "file-type": "^22.0.2",
+    "turndown": "^7.2.4",
     "zhipu-ai-provider": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/turndown": "^5.0.6",
     "zod": "^4.4.3"
   }
 }
