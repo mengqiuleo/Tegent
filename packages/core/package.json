@@ -26,7 +26,9 @@
     "@ai-sdk/provider": "4.0.7",
     "@ai-sdk/provider-utils": "5.0.29",
     "@ai-sdk/xai": "^4.0.43",
+    "@tavily/core": "^0.7.8",
     "ai": "^7.0.77",
+    "execa": "^10.0.1",
     "file-type": "^22.0.2",
     "zhipu-ai-provider": "^0.4.0"
   },
