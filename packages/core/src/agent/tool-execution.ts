@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -7,8 +6,10 @@ import type { LanguageModel } from 'ai'
 import type { LoopState } from './loop-state.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
 import { truncateToolResult } from './tools.js'
-import { clearProgressReporter, reportProgress } from './tools/progress.js'
+import { clearProgressReporter, reportProgress } from '../tools/progress.js'
+import { getShellProvider } from '../tools/shell-provider.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
+import { foldShellErrorNoise } from '../utils/shell-error.js'
 
 type ToolCall = {
   toolName: string
@@ -60,61 +61,55 @@ async function runShellCommand(
   toolCallId?: string,
   signal?: AbortSignal,
 ): Promise<{ output: string; isError: boolean }> {
-  return await new Promise((resolve) => {
-    const proc = spawn(command, {
-      shell: true,
-      cwd: process.cwd(),
-      env: process.env,
-      signal,
-    })
+  const proc = getShellProvider().spawn(command, { timeout, cwd: process.cwd(), env: process.env, signal })
 
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    let timedOut = false
-    let timer: ReturnType<typeof setTimeout>
+  reportProgress(toolCallId, 'Running command...')
 
-    const finish = (output: string, isError: boolean): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve({ output: truncateToolResult(output), isError })
+  let lastProgressTime = 0
+  const PROGRESS_THROTTLE_MS = 50
+
+  const onChunk = (chunk: Buffer) => {
+    const text = chunk.toString()
+    callbacks?.onShellOutput(text)
+
+    const now = Date.now()
+    if (now - lastProgressTime < PROGRESS_THROTTLE_MS) return
+    const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0)
+    const last = lines[lines.length - 1]
+    if (last) {
+      lastProgressTime = now
+      const trimmed = last.length > 120 ? `${last.slice(0, 117)}...` : last
+      if (toolCallId) reportProgress(toolCallId, trimmed)
     }
+  }
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString()
-      stdout += text
-      callbacks?.onShellOutput(text)
-      if (toolCallId) reportProgress(toolCallId, text.trim().split(/\r?\n/).at(-1) ?? 'Running command...')
-    })
+  proc.stdout?.on('data', onChunk)
+  proc.stderr?.on('data', onChunk)
 
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString()
-      stderr += text
-      callbacks?.onShellOutput(text)
-      if (toolCallId) reportProgress(toolCallId, text.trim().split(/\r?\n/).at(-1) ?? 'Running command...')
-    })
+  const result = await proc
+  const toStr = (value: unknown): string => (typeof value === 'string' ? value : '')
+  let stdout = foldShellErrorNoise(toStr(result.stdout))
+  let stderr = foldShellErrorNoise(toStr(result.stderr))
 
-    timer = setTimeout(() => {
-      timedOut = true
-      proc.kill()
-    }, timeout)
+  if (result.isMaxBuffer ?? false) {
+    const INLINE_CAP = 30_000
+    if (stdout.length > INLINE_CAP) {
+      stdout = stdout.slice(0, INLINE_CAP) + '\n... [stdout truncated — exceeded buffer limit]'
+    }
+    if (stderr.length > INLINE_CAP) {
+      stderr = stderr.slice(0, INLINE_CAP) + '\n... [stderr truncated — exceeded buffer limit]'
+    }
+  }
 
-    proc.on('error', (err) => finish(err.message || 'Command failed', true))
-
-    proc.on('close', (code) => {
-      const combined = [stdout, stderr].filter(Boolean).join('\n').trim()
-      if (timedOut) {
-        finish(`${combined}\nCommand timed out after ${timeout}ms`.trim(), true)
-        return
-      }
-      if (code !== 0) {
-        finish(combined ? `${combined}\nExit code ${code}` : `Exit code ${code}`, true)
-        return
-      }
-      finish(combined || 'Done', false)
-    })
-  })
+  const output = [stdout, stderr].filter(Boolean).join('\n').trim()
+  if (result.exitCode !== 0 || result.isMaxBuffer) {
+    const suffix = result.isMaxBuffer ? ' (output exceeded buffer limit)' : ''
+    return {
+      output: output ? `${output}\nExit code ${result.exitCode}${suffix}` : `Exit code ${result.exitCode}${suffix}`,
+      isError: true,
+    }
+  }
+  return { output: output || 'Done', isError: false }
 }
 
 async function executeWriteTool(toolName: string, input: Record<string, unknown>, toolCallId: string): Promise<string> {

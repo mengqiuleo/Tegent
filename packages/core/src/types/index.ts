@@ -1,6 +1,7 @@
 import type { LanguageModel } from 'ai'
 
 import type { z } from 'zod'
+import type { EditDiffPayload } from '../agent/diff.js'
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
 
@@ -28,23 +29,46 @@ export interface CheckpointEntry {
 }
 
 export interface AgentCallbacks {
+  // 模型流式吐出的文本增量。
   onTextDelta: (text: string) => void
+  // 模型开始调用工具时触发。
   onToolCall: (toolCallId: string, toolName: string, input: Record<string, unknown>) => void
+  // 工具运行中的进度消息，例如“正在搜索...”。
+  // UI 只展示最新一条进度，最终内容由 onToolResult 提供。
   onToolProgress: (toolCallId: string, message: string) => void
+  // 工具结束时触发。isError 为 true 表示失败结果。
   onToolResult: (toolCallId: string, result: string, isError?: boolean) => void
-  onAskUser: (question: string, options?: Array<{ label: string; description: string }>) => Promise<string>
+  // 成功写文件或编辑文件后、onToolResult 前触发。
+  // 只有真实改动才会触发；权限拒绝、报错、无变化编辑都会跳过。
+  onFileEdit?: (toolCallId: string, payload: EditDiffPayload) => void
+  // 工具需要用户审批时触发。
+  // yes = 仅本次允许；always = 以后同类允许；no = 拒绝。
   onAskPermission: (toolCall: {
     toolCallId: string
     toolName: string
     input: Record<string, unknown>
   }) => Promise<'yes' | 'always' | 'no'>
+  // 模型通过 askUser 工具向用户提问时触发，返回用户选择/输入的字符串。
+  onAskUser: (question: string, options: { label: string; description: string }[]) => Promise<string>
+  // exitPlanMode 发起计划审批时触发。
+  // 返回 true 表示离开计划模式并开始实施；false 表示退回计划模式继续修改计划。
+  onPlanApprovalRequest: (planText: string) => Promise<boolean>
+  // permissionMode 改变时触发，UI 用它刷新底部状态并可持久化到配置。
+  onPlanModeChange: (mode: PermissionMode) => void
+  // 模型调用 todoWrite 后触发。
+  onTodosUpdate: (todos: TodoItem[]) => void
+  // shell 工具输出的流式 chunk。
   onShellOutput: (chunk: string) => void
+  // token 用量更新。
   onUsageUpdate: (usage: TokenUsage) => void
+  // 上下文压缩完成后返回的摘要。
   onContextCompressed: (summary: string) => void
+  // 上下文压缩过程中每个阶段的进度描述，用于 UI spinner 文案。
   onCompressionProgress?: (description: string) => void
+  // agentLoop 内部错误统一从这里抛给外层 UI。
   onError: (error: Error) => void
-  onMemoryWrite?: (notice: string) => void
 }
+
 
 export interface ToolFilter {
   allow?: string[]
