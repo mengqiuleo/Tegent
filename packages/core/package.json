@@ -27,6 +27,7 @@
     "@ai-sdk/provider-utils": "5.0.29",
     "@ai-sdk/xai": "^4.0.43",
     "ai": "^7.0.77",
+    "file-type": "^22.0.2",
     "zhipu-ai-provider": "^0.4.0"
   },
   "devDependencies": {
