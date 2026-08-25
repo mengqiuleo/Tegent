@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { formatToolError } from '../utils/tool-errors.js'
 
 import { getRipgrepPath } from './utils.js'
+import { reportProgress } from './progress.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -31,7 +32,7 @@ export const glob = tool({
   execute: async ({ pattern, cwd }, { toolCallId }) => {
     try {
       const searchDir = cwd ?? process.cwd()
-      // todo: 工具进度上报
+      reportProgress(toolCallId, `Matching ${pattern}`)
       const isCatchAll = /^(\*\*\/?\*?|\*)$/.test(pattern.trim())
       const args = ['--files', '--sortr=modified', '--hidden', '--glob', '!.git']
       if (!isCatchAll) {

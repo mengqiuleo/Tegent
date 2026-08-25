@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { classifyFile } from '../agent/file-ingest.js'
 import { mediaTypeFor } from '../utils/media-type.js'
 import { formatToolError } from '../utils/tool-errors.js'
+import { reportProgress } from './progress.js'
 
 /** 不带参数调用 readFile 时的默认行数上限。与 Claude Code 的
  *  MAX_LINES_TO_READ 对齐，经验取值：2000 行是"略读整个文件"的合理
@@ -103,7 +104,7 @@ Usage:
   }),
   execute: async ({ filePath, offset, limit }, { toolCallId }) => {
     try {
-      // TODO: 进度上报
+      reportProgress(toolCallId, `Reading ${filePath}`)
       const kind = await classifyFile(filePath).catch(() => 'text' as const)
 
       if (kind === 'image') {

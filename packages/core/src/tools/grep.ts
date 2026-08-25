@@ -7,6 +7,7 @@ import { z } from 'zod'
 
 import { formatToolError } from '../utils/tool-errors.js'
 import { getRipgrepPath } from './utils.js'
+import { reportProgress } from './progress.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -50,7 +51,7 @@ Usage:
       args.push(pattern)
       args.push(searchPath ?? process.cwd())
 
-      // todo: 上报工具进度
+      reportProgress(toolCallId, `Searching for /${pattern}/`)
       const { stdout } = await execFileAsync(rgPath, args, {
         maxBuffer: RG_MAX_BUFFER,
         timeout: 30000,

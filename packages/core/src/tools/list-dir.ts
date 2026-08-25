@@ -5,6 +5,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 
 import { formatToolError } from '../utils/tool-errors.js'
+import { reportProgress } from './progress.js'
 
 /** 检查指定目录下的子目录+文件名，只列出当前目录的直接内容（一层），不会自动进入子目录查看其下的内容。 */
 export const listDir = tool({
@@ -14,7 +15,7 @@ export const listDir = tool({
   }),
   execute: async ({ dirPath }, { toolCallId }) => {
     try {
-      // todo: 进度上报
+      reportProgress(toolCallId, `Listing ${dirPath}`)
       const entries = await fs.readdir(dirPath, { withFileTypes: true })
       const lines = entries.map((e) => {
         const suffix = e.isDirectory() ? '/' : ''

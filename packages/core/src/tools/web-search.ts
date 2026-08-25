@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { formatToolError } from '../utils/tool-errors.js'
 
 import { getShellProvider } from './shell-provider.js'
+import { reportProgress } from './progress.js'
 
 const YEAR = new Date().getFullYear()
 const BRAVE_TIMEOUT_MS = 15_000
@@ -107,7 +108,7 @@ export const webSearch = tool({
 
     if (!hasTavily && !hasBrave) return buildMissingKeyError()
 
-    // todo: 进度上报
+    reportProgress(toolCallId, `Searching: ${query}`)
     try {
       const results = hasTavily ? await searchWithTavily(query, n) : await searchWithBrave(query, n)
       return formatResults(results)
