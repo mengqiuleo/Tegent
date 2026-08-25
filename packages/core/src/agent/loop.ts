@@ -15,8 +15,9 @@ import { drainStreamResult } from './stream-utils.js'
 import { buildSystemPrompt } from './system-prompt.js'
 import { processToolCalls } from './tool-execution.js'
 import { repairOrphanToolCalls, truncateToolResultsInMessages } from './tool-result-sanitize.js'
-import { toolRegistry, truncateToolResult } from './tools.js'
+import { toolRegistry, truncateToolResult } from '../tools/index.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
+import { clearProgressReporter, setProgressReporter } from '../tools/progress.js'
 
 export type { LoopState } from './loop-state.js'
 
@@ -53,13 +54,23 @@ async function streamChunksToUI(result: StreamResult, callbacks: AgentCallbacks)
     }
 
     if (chunk.type === 'tool-call') {
+      if (chunk.toolCallId) {
+        setProgressReporter(chunk.toolCallId, (msg) => callbacks.onToolProgress(chunk.toolCallId ?? '', msg))
+      }
       callbacks.onToolCall(chunk.toolCallId ?? '', chunk.toolName ?? '', (chunk.input ?? {}) as Record<string, unknown>)
       continue
     }
 
     if (chunk.type === 'tool-result') {
       const raw = typeof chunk.output === 'string' ? chunk.output : JSON.stringify(chunk.output ?? '')
+      if (chunk.toolCallId) clearProgressReporter(chunk.toolCallId)
       callbacks.onToolResult(chunk.toolCallId ?? '', truncateToolResult(raw))
+      continue
+    }
+
+    // reasoning-* chunk 直接跳过，UI 不显示，token 仍然会正常计费。
+    if (chunk.type === 'reasoning-start' || chunk.type === 'reasoning-delta' || chunk.type === 'reasoning-end') {
+      continue
     }
   }
 }
