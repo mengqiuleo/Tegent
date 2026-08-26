@@ -23,3 +23,16 @@ export {
 } from './permissions/index.js'
 export { loadPersistedRules, persistRule } from './permissions/index.js'
 export type { AllowRule } from './permissions/session-store.js'
+
+
+// Skills
+export {
+  SkillRegistry,
+  createSkillRegistry,
+  reloadSkillRegistry,
+  formatSkillActivationBody,
+  wrapActivatedSkill,
+} from './skills/registry.js'
+export type { SkillDefinition, SkillEntry, SkillReloadSummary } from './skills/registry.js'
+export { getScopedDisabledSkills, setSkillDisabled, skillSettingsPath } from './skills/settings.js'
+export type { SkillSettingsScope } from './skills/settings.js'
