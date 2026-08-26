@@ -12,7 +12,7 @@ import { getShellProvider } from '../tools/shell-provider.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 import { foldShellErrorNoise } from '../utils/shell-error.js'
 import { runSubAgent } from './sub-agents/runner.js'
-
+import { checkPermission } from '../permissions/index.js'
 
 type ToolCall = {
   toolName: string
@@ -148,6 +148,35 @@ async function executeWriteTool(toolName: string, input: Record<string, unknown>
 }
 
 
+/** writeFile/edit/shell 的权限门。 */
+async function checkWriteOrShellPermission(
+  tc: ToolCall,
+  state: LoopState,
+  options: AgentOptions,
+  callbacks: AgentCallbacks,
+): Promise<boolean> {
+  // 只有会产生本地副作用的内置工具走这道权限门；其它工具各自处理权限。
+  if (tc.toolName !== 'writeFile' && tc.toolName !== 'edit' && tc.toolName !== 'shell') return true
+
+  // 统一走项目里的权限分类器，决定当前调用是否能继续。
+  const approved = await checkPermission(
+    { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
+    options.trustMode,
+    callbacks.onAskPermission,
+    state.permissionMode,
+    process.cwd(),
+  )
+  if (options.abortSignal?.aborted) {
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, '[Tool execution interrupted by user]', true)
+    return false
+  }
+  if (!approved) {
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Permission denied by user.')
+    return false
+  }
+  return true
+}
+
 async function executeBypassTool(
   tc: ToolCall,
   state: LoopState,
@@ -156,22 +185,22 @@ async function executeBypassTool(
   parentModel: LanguageModel,
 ): Promise<boolean> {
   if (tc.toolName === 'askUser') {
-    await handleAskUser(tc.input, tc.toolCallId, state, callbacks)
+    await handleAskUser(tc.input, tc.toolCallId, state, callbacks, pushToolResult)
     return true
   }
 
   if (tc.toolName === 'todoWrite') {
-    await handleTodoWrite(tc.input, tc.toolCallId, state, callbacks)
+    await handleTodoWrite(tc.input, tc.toolCallId, state, callbacks, pushToolResult)
     return true
   }
 
   if (tc.toolName === 'enterPlanMode') {
-    await handleEnterPlanMode(tc.input, tc.toolCallId, state, options, callbacks)
+    await handleEnterPlanMode(tc.input, tc.toolCallId, state, options, callbacks, pushToolResult)
     return true
   }
 
   if (tc.toolName === 'exitPlanMode') {
-    await handleExitPlanMode(tc.input, tc.toolCallId, state, callbacks)
+    await handleExitPlanMode(tc.input, tc.toolCallId, state, callbacks, pushToolResult)
     return true
   }
 
@@ -204,20 +233,6 @@ async function executeBypassTool(
   return false
 }
 
-async function askPermission(
-  tc: ToolCall,
-  state: LoopState,
-  options: AgentOptions,
-  callbacks: AgentCallbacks,
-): Promise<boolean> {
-  if (options.trustMode) return true
-  if ((tc.toolName === 'writeFile' || tc.toolName === 'edit') && state.permissionMode === 'acceptEdits') return true
-  if (tc.toolName !== 'writeFile' && tc.toolName !== 'edit' && tc.toolName !== 'shell') return true
-
-  const decision = await callbacks.onAskPermission(tc)
-  return decision === 'yes' || decision === 'always'
-}
-
 async function handleToolCall(
   tc: ToolCall,
   state: LoopState,
@@ -225,13 +240,10 @@ async function handleToolCall(
   callbacks: AgentCallbacks,
   parentModel: LanguageModel,
 ): Promise<void> {
-  if (!(await askPermission(tc, state, options, callbacks))) {
-    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Permission denied by user.')
-    return
-  }
-
   try {
     if (await executeBypassTool(tc, state, options, callbacks, parentModel)) return
+
+    if (!(await checkWriteOrShellPermission(tc, state, options, callbacks))) return
 
     if (tc.toolName === 'writeFile' || tc.toolName === 'edit') {
       const output = await executeWriteTool(tc.toolName, tc.input, tc.toolCallId)

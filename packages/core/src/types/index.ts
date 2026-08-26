@@ -6,6 +6,7 @@ import type { SubAgentRegistry } from '../agent/sub-agents/registry.js'
 import type { SubAgentDefinition, SubAgentEvent, SubAgentTrace } from '../agent/sub-agents/types.js'
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
+export type PermissionLevel = 'always-allow' | 'ask' | 'deny'
 
 export interface TokenUsage {
   inputTokens: number
