@@ -45,7 +45,7 @@ export function foldShellErrorNoise(text: string): string {
   const out: string[] = []
   let i = 0
   while (i < lines.length) {
-    const line = lines[i]
+    const line = lines[i] ?? ''
     if (!isBlockStart(line)) {
       out.push(line)
       i++
@@ -59,8 +59,9 @@ export function foldShellErrorNoise(text: string): string {
     // 后者用于处理多个错误拼在一起的情况。扫描上限是防御性保险，真实 PS 错误基本触不到。
     let scanned = 0
     while (i < lines.length && scanned < BLOCK_SCAN_LIMIT) {
-      if (isBlockStart(lines[i])) break
-      const terminator = isFqidTerminator(lines[i])
+      const current = lines[i] ?? ''
+      if (isBlockStart(current)) break
+      const terminator = isFqidTerminator(current)
       i++
       scanned++
       if (terminator) break

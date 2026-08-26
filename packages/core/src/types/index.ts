@@ -49,7 +49,8 @@ export interface AgentCallbacks {
     input: Record<string, unknown>
   }) => Promise<'yes' | 'always' | 'no'>
   // 模型通过 askUser 工具向用户提问时触发，返回用户选择/输入的字符串。
-  onAskUser: (question: string, options: { label: string; description: string }[]) => Promise<string>
+  // options 缺省表示开放式问题，由用户自由输入而不是从候选中选择。
+  onAskUser: (question: string, options?: { label: string; description: string }[] | undefined) => Promise<string>
   // exitPlanMode 发起计划审批时触发。
   // 返回 true 表示离开计划模式并开始实施；false 表示退回计划模式继续修改计划。
   onPlanApprovalRequest: (planText: string) => Promise<boolean>
@@ -65,6 +66,8 @@ export interface AgentCallbacks {
   onContextCompressed: (summary: string) => void
   // 上下文压缩过程中每个阶段的进度描述，用于 UI spinner 文案。
   onCompressionProgress?: (description: string) => void
+  // 记忆提取器写入一条记忆后触发，notice 是单行描述。
+  onMemoryWrite?: (notice: string) => void
   // agentLoop 内部错误统一从这里抛给外层 UI。
   onError: (error: Error) => void
 }

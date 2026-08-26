@@ -12,7 +12,7 @@ export interface ShellSpawnOptions {
   timeout: number
   env?: NodeJS.ProcessEnv
   cwd?: string
-  signal?: AbortSignal
+  signal?: AbortSignal | undefined
 }
 
 
@@ -25,14 +25,19 @@ function createPosixProvider(executable: string, type: 'bash' | 'zsh'): ShellPro
   return {
     type,
     spawn(command, opts) {
+      // execa 会从选项对象推断出 ResultPromise<具体选项类型>，在
+      // exactOptionalPropertyTypes 下与接口的裸 ResultPromise<Options> 因
+      // Promise.then 逆变而互不兼容，这里是一次性的边界断言。
+      // 另外 exactOptionalPropertyTypes 不允许显式传 undefined，execa 的
+      // cwd / cancelSignal 只接受省略，因此只在有值时才展开进选项对象。
       return execa(executable, ['-c', command], {
         timeout: opts.timeout,
         maxBuffer: MAX_SHELL_BUFFER,
-        cwd: opts.cwd,
         reject: false,
-        cancelSignal: opts.signal,
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+        ...(opts.signal !== undefined ? { cancelSignal: opts.signal } : {}),
         env: { ...(opts.env ?? process.env), PYTHONIOENCODING: 'utf-8' },
-      })
+      }) as ResultPromise
     },
   }
 }
@@ -56,11 +61,11 @@ function createPowerShellProvider(executable: string): ShellProvider {
       return execa(executable, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShellCommand(wrapped)], {
         timeout: opts.timeout,
         maxBuffer: MAX_SHELL_BUFFER,
-        cwd: opts.cwd,
         reject: false,
-        cancelSignal: opts.signal,
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+        ...(opts.signal !== undefined ? { cancelSignal: opts.signal } : {}),
         env: { ...(opts.env ?? process.env), PYTHONIOENCODING: 'utf-8' },
-      })
+      }) as ResultPromise
     },
   }
 }

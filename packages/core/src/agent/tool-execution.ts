@@ -5,7 +5,7 @@ import type { LanguageModel } from 'ai'
 
 import type { LoopState } from './loop-state.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
-import { truncateToolResult } from './tools.js'
+import { truncateToolResult } from '../tools/index.js'
 import { clearProgressReporter, reportProgress } from '../tools/progress.js'
 import { getShellProvider } from '../tools/shell-provider.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'

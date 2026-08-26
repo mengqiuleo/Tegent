@@ -106,7 +106,7 @@ function sliceBytes(buf: Buffer, bytes: number, direction: 'head' | 'tail'): Buf
 
     // UTF-8 延续字节的高两位是 10，即 `(byte & 0xc0) === 0x80`。
     // 如果 end 落在延续字节上，就不断向前退，直到完整字符的起始边界。
-    while (end > 0 && (buf[end] & 0xc0) === 0x80) end--
+    while (end > 0 && ((buf[end] ?? 0) & 0xc0) === 0x80) end--
 
     // 返回从 Buffer 开头到安全终点的视图。
     return buf.subarray(0, end)
@@ -117,7 +117,7 @@ function sliceBytes(buf: Buffer, bytes: number, direction: 'head' | 'tail'): Buf
   let start = buf.length - bytes
 
   // 如果理论起点落在 UTF-8 延续字节中间，就向后移动到下一个完整字符边界。
-  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
+  while (start < buf.length && ((buf[start] ?? 0) & 0xc0) === 0x80) start++
 
   // 返回安全起点到 Buffer 结尾的视图。
   return buf.subarray(start)

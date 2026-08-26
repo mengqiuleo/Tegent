@@ -49,6 +49,20 @@ const { state, turnCount } = await agentLoop(
       const answer = await rl.question(`\n允许执行 ${call.toolName} ${JSON.stringify(call.input)} ? (y/n) `)
       return answer.trim().toLowerCase().startsWith('y') ? 'yes' : 'no'
     },
+    onAskUser: async (question, options) => {
+      console.log(`\n[ask] ${question}`)
+      for (const [i, opt] of (options ?? []).entries()) {
+        console.log(`  ${i + 1}. ${opt.label} —— ${opt.description}`)
+      }
+      return rl.question('[ask] 输入回答 > ')
+    },
+    onPlanApprovalRequest: async (planText) => {
+      console.log(`\n[plan] ${planText}`)
+      const answer = await rl.question('批准该计划？(y/n) ')
+      return answer.trim().toLowerCase().startsWith('y')
+    },
+    onPlanModeChange: (mode) => console.log(`[plan-mode] ${mode}`),
+    onTodosUpdate: (todos) => console.log(`[todos] ${todos.map((t) => `${t.content}:${t.status}`).join(' | ')}`),
   },
 )
 

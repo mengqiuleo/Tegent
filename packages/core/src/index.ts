@@ -9,5 +9,5 @@ export { getAvailableProviders, getEnvVarName, resolveModelId } from './config/i
 
 // type
 export { PROVIDER_DETECTION_ORDER, PROVIDER_KEY_URLS } from './types/index.js'
-export type { AgentOptions } from './types/index.js'
+export type { AgentOptions, PermissionMode, TodoItem } from './types/index.js'
 export type { LanguageModelLike as LanguageModel } from './types/index.js'

@@ -4,7 +4,7 @@
 import { useCallback, useRef, useState } from 'react'
 
 import { agentLoop, saveSession } from '@tegent/core'
-import type { AgentOptions, LanguageModel, LoopState } from '@tegent/core'
+import type { AgentOptions, LanguageModel, LoopState, PermissionMode, TodoItem } from '@tegent/core'
 
 /** UI 直接渲染的消息形状：user 输入、assistant 输出、tool 事件行。 */
 export interface DisplayMessage {
@@ -93,6 +93,18 @@ export function useAgent(model: LanguageModel, options: AgentOptions) {
     // 权限问答占位：trust 模式直接放行，否则直接拒绝。
     // TODO: 换成真正的权限确认 UI 时，在这里弹窗并等待用户选择。
     onAskPermission: async () => (options.trustMode ? 'yes' : 'no'),
+
+    // askUser 占位：还没有交互式选择 UI，回显问题让模型至少拿到确定回复。
+    // TODO: 接入输入组件后，把 options 渲染成候选列表并等待用户选择。
+    onAskUser: async (question: string) => `(no interactive input yet) ${question}`,
+
+    // 计划审批占位：先直接批准，让 exitPlanMode 流程能走通。
+    // TODO: 接入计划展示 UI 后，展示 planText 并等待用户批准或驳回。
+    onPlanApprovalRequest: async (_planText: string) => true,
+
+    onPlanModeChange: (_mode: PermissionMode) => {},
+
+    onTodosUpdate: (_todos: TodoItem[]) => {},
   }
 
   /**
