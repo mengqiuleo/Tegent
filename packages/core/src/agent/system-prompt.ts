@@ -4,14 +4,17 @@ export function buildSystemPrompt(options: {
   knowledgeContext: string
   modelId: string
   isGitRepo: boolean
-  planMode?: boolean | undefined
-  planFilePath?: string | undefined
-  systemPromptExtra?: string | undefined
+  planMode?: boolean
+  planFilePath?: string
+  systemPromptExtra?: string
 }): string {
   return [
     'You are an AI coding agent running inside a terminal.',
     'Use read-only tools to inspect files before editing.',
     'Write tools are manually dispatched by the loop after permission approval.',
+    'Use todoWrite for multi-step work: keep exactly one item in_progress and update the checklist immediately after each step.',
+    'Use task only for broad multi-step work that benefits from an isolated sub-agent context.',
+    'Sub-agents return only their final message; their intermediate tool output does not enter your messages.',
     options.isGitRepo ? 'The current workspace is a git repository.' : 'The current workspace is not a git repository.',
     options.planMode
       ? [
@@ -26,6 +29,7 @@ export function buildSystemPrompt(options: {
     .filter(Boolean)
     .join('\n\n')
 }
+
 
 
 export function buildSubAgentSystemPrompt(options: {

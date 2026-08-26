@@ -1,13 +1,16 @@
-import type { AgentCallbacks, AgentOptions } from '../types/index.js'
+import type { AgentCallbacks, AgentOptions, TodoItem } from '../types/index.js'
 import type { LoopState } from './loop-state.js'
 import { clearProgressReporter } from '../tools/progress.js'
 import { makePlanFilePath, readPlan, writePlan } from './plan-storage.js'
 import { toolErrorString, toolResultMessage } from './messages.js'
+import { extractText } from '../utils/message-helpers.js'
 
 function lastUserMessageText(messages: LoopState['messages']): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg?.role === 'user' && typeof msg.content === 'string') return msg.content
+    const m = messages[i]
+    if (m && m.role === 'user') {
+      return extractText(m.content)
+    }
   }
   return ''
 }
@@ -181,5 +184,56 @@ export async function handleExitPlanMode(
       'Read the user feedback, revise the plan, and call exitPlanMode again.',
     ].join('\n'),
     true,
+  )
+}
+
+
+export async function handleTodoWrite(
+  input: Record<string, unknown>,
+  toolCallId: string,
+  state: LoopState,
+  callbacks: AgentCallbacks,
+): Promise<void> {
+  type RawTodo = { content?: string; activeForm?: string; status?: TodoItem['status'] }
+  const raw = (input.todos as RawTodo[] | undefined) ?? []
+  const normalized: TodoItem[] = []
+
+  for (const t of raw) {
+    const content = (t.content ?? '').trim()
+    const activeForm = (t.activeForm ?? '').trim()
+    if (!content && !activeForm) continue
+    normalized.push({
+      content: content || activeForm,
+      activeForm: activeForm || content,
+      status: t.status ?? 'pending',
+    })
+  }
+
+  const allDone = normalized.length > 0 && normalized.every((t) => t.status === 'completed')
+  state.todos = allDone ? [] : normalized
+  callbacks.onTodosUpdate(state.todos)
+
+  const dropped = raw.length - normalized.length
+  const droppedNote =
+    dropped > 0
+      ? ` ${dropped} entr${dropped === 1 ? 'y was' : 'ies were'} dropped because they had neither content nor activeForm - please include both fields next time so the user sees clean labels.`
+      : ''
+  const VERIFY_RE = /\b(verif|test|check|lint|build|typecheck|tsc)\b/i
+  const needsVerifyNudge =
+    allDone &&
+    normalized.length >= 3 &&
+    !normalized.some((t) => VERIFY_RE.test(t.content) || VERIFY_RE.test(t.activeForm))
+  const verifyNote = needsVerifyNudge
+    ? ' Before wrapping up, verify your work - run tests, lint, or type-check as appropriate for this project.'
+    : ''
+
+  pushToolResult(
+    state,
+    callbacks,
+    toolCallId,
+    'todoWrite',
+    allDone
+      ? `All todos completed. Checklist cleared.${verifyNote}${droppedNote}`
+      : `Todo list updated. Keep the checklist current - mark items completed immediately when finished, and ensure exactly one item is in_progress.${droppedNote}`,
   )
 }

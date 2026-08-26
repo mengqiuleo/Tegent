@@ -224,7 +224,9 @@ export async function agentLoop(
       knowledgeContext: state.knowledgeContext,
       modelId: options.modelId,
       isGitRepo: gitRepo,
-      systemPromptExtra: options.systemPromptExtra,
+      planMode: state.permissionMode === 'plan',
+      planFilePath: state.currentPlanPath ?? '',
+      systemPromptExtra: options.systemPromptExtra || '',
     })
   }
 

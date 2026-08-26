@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { LanguageModel } from 'ai'
 
 import type { LoopState } from './loop-state.js'
-import { handleAskUser, handleEnterPlanMode, handleExitPlanMode } from './plan-tools.js'
+import { handleAskUser, handleEnterPlanMode, handleExitPlanMode, handleTodoWrite } from './plan-tools.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
 import { truncateToolResult } from '../tools/index.js'
 import { clearProgressReporter, reportProgress } from '../tools/progress.js'
@@ -161,8 +161,7 @@ async function executeBypassTool(
   }
 
   if (tc.toolName === 'todoWrite') {
-    state.todos = (tc.input.todos as typeof state.todos | undefined) ?? []
-    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, `Todo list updated: ${state.todos.length} items`)
+    await handleTodoWrite(tc.input, tc.toolCallId, state, callbacks)
     return true
   }
 

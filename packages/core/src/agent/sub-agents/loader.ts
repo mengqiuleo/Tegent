@@ -15,8 +15,8 @@ const frontmatterSchema = z.object({
   shellRestrictions: z.array(z.string()).optional(),
 })
 
-function userXcodeDir(): string {
-  return process.env.X_CODE_HOME ?? path.join(process.env.HOME ?? process.cwd(), '.x-code')
+function userTeCodeDir(): string {
+  return process.env.X_CODE_HOME ?? path.join(process.env.HOME ?? process.cwd(), '.tegent')
 }
 
 function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: string } | null {
@@ -97,8 +97,8 @@ async function loadAgentsFromDir(dir: string, source: SubAgentDefinition['source
 }
 
 export async function loadCustomAgents(): Promise<SubAgentDefinition[]> {
-  const userAgents = await loadAgentsFromDir(path.join(userXcodeDir(), 'agents'), 'user')
-  const projectAgents = await loadAgentsFromDir(path.join(process.cwd(), '.x-code', 'agents'), 'project')
+  const userAgents = await loadAgentsFromDir(path.join(userTeCodeDir(), 'agents'), 'user')
+  const projectAgents = await loadAgentsFromDir(path.join(process.cwd(), '.tegent', 'agents'), 'project')
 
   return [...userAgents, ...projectAgents]
 }
