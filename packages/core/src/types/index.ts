@@ -2,6 +2,8 @@ import type { LanguageModel } from 'ai'
 
 import type { z } from 'zod'
 import type { EditDiffPayload } from '../agent/diff.js'
+import type { SubAgentRegistry } from '../agent/sub-agents/registry.js'
+import type { SubAgentDefinition, SubAgentEvent, SubAgentTrace } from '../agent/sub-agents/types.js'
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
 
@@ -70,6 +72,7 @@ export interface AgentCallbacks {
   onMemoryWrite?: (notice: string) => void
   // agentLoop 内部错误统一从这里抛给外层 UI。
   onError: (error: Error) => void
+  onSubAgentEvent?: (event: SubAgentEvent) => void
 }
 
 
@@ -88,7 +91,13 @@ export interface AgentOptions {
   systemPromptExtra?: string
   abortSignal?: AbortSignal
   toolFilter?: ToolFilter
+  subAgentRegistry?: SubAgentRegistry
+  modelRegistry?: {
+    languageModel: (id: `${string}:${string}`) => LanguageModel
+  }
 }
+
+export type { SubAgentDefinition, SubAgentEvent, SubAgentRegistry, SubAgentTrace }
 
 export type LanguageModelLike = LanguageModel
 

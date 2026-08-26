@@ -12,15 +12,15 @@ export interface SubAgentDefinition {
   /** Markdown 正文，也就是该子代理的系统提示词主体。 */
   prompt: string
   /** 允许调用的工具列表。省略时使用默认只读工具集合。`'*'` 表示允许所有工具。 */
-  tools?: string[]
+  tools?: string[] | undefined
   /** 显式禁止的工具列表，会在 tools 允许列表之后再应用。 */
-  disallowedTools?: string[]
+  disallowedTools?: string[] | undefined
   /** 模型覆盖，例如 "anthropic:claude-sonnet-4-6"。省略时继承父代理模型。 */
-  model?: string
+  model?: string | undefined
   /** 子代理最多 agentic turn 数，超过后强制停止。 */
   maxTurns: number
   /** 禁止的 shell 命令关键字。只有 shell 在 tools 中可用时才有意义。 */
-  shellRestrictions?: string[]
+  shellRestrictions?: string[] | undefined
   /** 定义来源：内置、用户级或项目级。 */
   source: 'built-in' | 'user' | 'project'
   /** 当子代理来自插件贡献时，记录所属插件 id，格式通常是 `name@marketplace`。 */
