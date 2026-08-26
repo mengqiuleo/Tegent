@@ -15,6 +15,7 @@ import { drainStreamResult } from './stream-utils.js'
 import { buildSystemPrompt } from './system-prompt.js'
 import { processToolCalls } from './tool-execution.js'
 import { repairOrphanToolCalls, truncateToolResultsInMessages } from './tool-result-sanitize.js'
+import { createActivateSkillTool } from '../tools/activate-skill.js'
 import { toolRegistry, truncateToolResult } from '../tools/index.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 import { clearProgressReporter, setProgressReporter } from '../tools/progress.js'
@@ -130,6 +131,16 @@ async function runTurn(
   // 先修复孤立的 tool call，避免下一次请求体不合法。
   repairOrphanToolCalls(state.messages)
 
+  // activateSkill 每轮重建而不是会话级缓存：registry 可能被 /skill refresh 原地
+  // reload，重建后工具描述里的 skill 名单立即跟随最新状态，而各处缓存的
+  // options.skillRegistry 引用保持不变。没有已启用 skill 时不注入，工具列表退回静态注册表。
+  const tools = {
+    ...toolRegistry,
+    ...(options.skillRegistry && options.skillRegistry.names().length > 0
+      ? { activateSkill: createActivateSkillTool(options.skillRegistry) }
+      : {}),
+  }
+
   let result: StreamResult
   try {
     result = streamText({
@@ -138,7 +149,7 @@ async function runTurn(
       messages: state.messages,
       // AI SDK v7 的 ToolSet 联合类型与 exactOptionalPropertyTypes 不兼容
       //（无 execute 的工具既不能赋值也不能直接断言），只能走双重断言绕过。
-      tools: toolRegistry as unknown as ToolSet,
+      tools: tools as unknown as ToolSet,
       maxRetries: 3,
       // exactOptionalPropertyTypes 下不能显式传 undefined，用条件展开。
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),

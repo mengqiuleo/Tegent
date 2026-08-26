@@ -4,6 +4,7 @@ import chalk from 'chalk'
 import {
   PROVIDER_DETECTION_ORDER,
   createModelRegistry,
+  createSkillRegistry,
   getAvailableProviders,
   getEnvVarName,
   resolveModelId,
@@ -75,9 +76,14 @@ async function main() {
   const providerRegistry = createModelRegistry()
   const model = providerRegistry.languageModel(modelId)
 
+  // skill 注册表整个进程只创建一次（扫描 ~/.tegent/skills 和 .tegent/skills）。
+  // loop 每轮从它重建 activateSkill 工具，因此 /skill refresh 原地 reload 后立即生效。
+  const skillRegistry = await createSkillRegistry()
+
   const options: AgentOptions = {
     modelId,
     trustMode: argv.trust,
+    skillRegistry,
     ...(argv['max-turns'] !== undefined ? { maxTurns: argv['max-turns'] } : {}),
   }
 

@@ -4,6 +4,7 @@ import type { z } from 'zod'
 import type { EditDiffPayload } from '../agent/diff.js'
 import type { SubAgentRegistry } from '../agent/sub-agents/registry.js'
 import type { SubAgentDefinition, SubAgentEvent, SubAgentTrace } from '../agent/sub-agents/types.js'
+import type { SkillRegistry } from '../skills/registry.js'
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
 export type PermissionLevel = 'always-allow' | 'ask' | 'deny'
@@ -93,6 +94,10 @@ export interface AgentOptions {
   abortSignal?: AbortSignal
   toolFilter?: ToolFilter
   subAgentRegistry?: SubAgentRegistry
+  // 会话级 skill 注册表。有已启用 skill 时 loop 会给模型注入 activateSkill 工具。
+  // 注册表对象在整个会话内保持身份不变，/skill refresh 通过原地 reload 更新内容，
+  // 因此这里缓存引用是安全的。子代理通过 ...parentOptions 展开自然继承。
+  skillRegistry?: SkillRegistry
   modelRegistry?: {
     languageModel: (id: `${string}:${string}`) => LanguageModel
   }
