@@ -20,7 +20,7 @@ export interface UserConfig {
 }
 
 function userTeCodeDir(): string {
-  return path.join(process.cwd(), '.te-code')
+  return path.join(process.cwd(), '.tegent')
 }
 
 export function getUserConfigPath(): string {

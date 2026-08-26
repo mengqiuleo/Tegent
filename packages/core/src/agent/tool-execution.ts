@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { LanguageModel } from 'ai'
 
 import type { LoopState } from './loop-state.js'
+import { handleAskUser, handleEnterPlanMode, handleExitPlanMode } from './plan-tools.js'
 import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
 import { truncateToolResult } from '../tools/index.js'
 import { clearProgressReporter, reportProgress } from '../tools/progress.js'
@@ -151,10 +152,7 @@ async function executeBypassTool(
   callbacks: AgentCallbacks,
 ): Promise<boolean> {
   if (tc.toolName === 'askUser') {
-    const question = tc.input.question as string
-    const choices = tc.input.options as Array<{ label: string; description: string }> | undefined
-    const answer = await callbacks.onAskUser(question, choices)
-    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, `User answered: ${answer}`)
+    await handleAskUser(tc.input, tc.toolCallId, state, callbacks)
     return true
   }
 
@@ -165,14 +163,12 @@ async function executeBypassTool(
   }
 
   if (tc.toolName === 'enterPlanMode') {
-    state.permissionMode = 'plan'
-    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Entered plan mode.')
+    await handleEnterPlanMode(tc.input, tc.toolCallId, state, options, callbacks)
     return true
   }
 
   if (tc.toolName === 'exitPlanMode') {
-    state.permissionMode = 'default'
-    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Exited plan mode.')
+    await handleExitPlanMode(tc.input, tc.toolCallId, state, callbacks)
     return true
   }
 
