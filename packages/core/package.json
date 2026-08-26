@@ -13,7 +13,9 @@
   "scripts": {
     "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -b",
     "dev": "tsc -b --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-sdk/alibaba": "^2.0.34",
@@ -39,6 +41,7 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/turndown": "^5.0.6",
+    "vitest": "^4.1.11",
     "zod": "^4.4.3"
   }
 }

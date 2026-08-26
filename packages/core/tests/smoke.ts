@@ -1,8 +1,9 @@
 // agentLoop 冒烟测试：真实调用 DeepSeek，观察流式输出 / 工具调用 / 权限流程。
+// 手动脚本，不进 vitest（vitest 只收集 tests/**/*.test.ts）。
 //
 // 用法（在仓库根目录执行）：
 //   1. 根目录建 .env 文件，写入 DEEPSEEK_API_KEY=sk-xxx
-//   2. pnpm exec tsx packages/core/test/smoke.ts "你的指令"
+//   2. pnpm exec tsx packages/core/tests/smoke.ts "你的指令"
 //   3. 不带参数则跑默认的纯文本任务（不碰任何工具）
 import 'dotenv/config'
 import readline from 'node:readline/promises'

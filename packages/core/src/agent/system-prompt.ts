@@ -2,9 +2,9 @@ export function buildSystemPrompt(options: {
   knowledgeContext: string
   modelId: string
   isGitRepo: boolean
-  planMode?: boolean
-  planFilePath?: string
-  systemPromptExtra?: string
+  planMode?: boolean | undefined
+  planFilePath?: string | undefined
+  systemPromptExtra?: string | undefined
 }): string {
   return [
     'You are an AI coding agent running inside a terminal.',
