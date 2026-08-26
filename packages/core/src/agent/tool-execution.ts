@@ -11,6 +11,8 @@ import { clearProgressReporter, reportProgress } from '../tools/progress.js'
 import { getShellProvider } from '../tools/shell-provider.js'
 import type { AgentCallbacks, AgentOptions } from '../types/index.js'
 import { foldShellErrorNoise } from '../utils/shell-error.js'
+import { runSubAgent } from './sub-agents/runner.js'
+
 
 type ToolCall = {
   toolName: string
@@ -145,11 +147,13 @@ async function executeWriteTool(toolName: string, input: Record<string, unknown>
   return toolErrorString(`No manual executor for ${toolName}`)
 }
 
+
 async function executeBypassTool(
   tc: ToolCall,
   state: LoopState,
   options: AgentOptions,
   callbacks: AgentCallbacks,
+  parentModel: LanguageModel,
 ): Promise<boolean> {
   if (tc.toolName === 'askUser') {
     await handleAskUser(tc.input, tc.toolCallId, state, callbacks)
@@ -169,6 +173,32 @@ async function executeBypassTool(
 
   if (tc.toolName === 'exitPlanMode') {
     await handleExitPlanMode(tc.input, tc.toolCallId, state, callbacks)
+    return true
+  }
+
+  if(tc.toolName === 'task') {
+    const agentName = tc.input.subagent_type as string
+    const description = tc.input.description as string
+    const prompt = tc.input.prompt as string
+
+    reportProgress(tc.toolCallId, `Task: ${description} (${agentName})`)
+    const result = await runSubAgent(
+      {
+        parentState: state,
+        parentOptions: options,
+        callbacks,
+        toolCallId: tc.toolCallId,
+        agentName,
+        description,
+        prompt,
+        knowledgeContext: state.knowledgeContext ?? '',
+        isGitRepo: state.isGitRepo ?? false,
+      },
+      parentModel,
+    )
+
+    const statsLine = `<task_stats tool_calls="${result.toolCallCount}" tokens="${result.tokenUsage.totalTokens}" duration_ms="${result.durationMs}" />`
+    pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, `${result.resultText}\n${statsLine}`)
     return true
   }
 
@@ -194,6 +224,7 @@ async function handleToolCall(
   state: LoopState,
   options: AgentOptions,
   callbacks: AgentCallbacks,
+  parentModel: LanguageModel,
 ): Promise<void> {
   if (!(await askPermission(tc, state, options, callbacks))) {
     pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Permission denied by user.')
@@ -201,7 +232,7 @@ async function handleToolCall(
   }
 
   try {
-    if (await executeBypassTool(tc, state, options, callbacks)) return
+    if (await executeBypassTool(tc, state, options, callbacks, parentModel)) return
 
     if (tc.toolName === 'writeFile' || tc.toolName === 'edit') {
       const output = await executeWriteTool(tc.toolName, tc.input, tc.toolCallId)
@@ -229,12 +260,12 @@ export async function processToolCalls(
   state: LoopState,
   options: AgentOptions,
   callbacks: AgentCallbacks,
-  _model: LanguageModel,
+  model: LanguageModel,
 ): Promise<void> {
   const fulfilled = collectFulfilledToolCallIds(state)
 
   for (const tc of toolCalls) {
     if (fulfilled.has(tc.toolCallId)) continue
-    await handleToolCall(tc, state, options, callbacks)
+    await handleToolCall(tc, state, options, callbacks, model)
   }
 }
