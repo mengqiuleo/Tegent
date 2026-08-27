@@ -28,6 +28,7 @@
     "@ai-sdk/provider": "4.0.7",
     "@ai-sdk/provider-utils": "5.0.29",
     "@ai-sdk/xai": "^4.0.43",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tavily/core": "^0.7.8",
     "@vscode/ripgrep": "^1.18.0",
     "ai": "^7.0.77",

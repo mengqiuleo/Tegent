@@ -4,6 +4,7 @@ import type { z } from 'zod'
 import type { EditDiffPayload } from '../agent/diff.js'
 import type { SubAgentRegistry } from '../agent/sub-agents/registry.js'
 import type { SubAgentDefinition, SubAgentEvent, SubAgentTrace } from '../agent/sub-agents/types.js'
+import type { Tool } from '../mcp/type.js'
 import type { SkillRegistry } from '../skills/registry.js'
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
@@ -198,4 +199,49 @@ export const PROVIDER_KEY_URLS: Record<BuiltInProviderName, string> = {
   alibaba: 'https://dashscope.console.aliyun.com/apiKey',
   zhipu: 'https://open.bigmodel.cn/usercenter/apikeys',
   moonshotai: 'https://platform.moonshot.ai/console/api-keys',
+}
+
+
+
+/**
+ * 工具注册表。
+ *
+ * Claude Code 的工具注册方式是在 tools.ts 中硬编码一个数组（getAllBaseTools），
+ * 然后通过 getTools() 和 assembleToolPool() 层层过滤：
+ *
+ *   getAllBaseTools() → 全量工具列表（含条件编译的工具）
+ *   getTools(permCtx) → 过滤 deny 规则 + isEnabled 检查
+ *   assembleToolPool(permCtx, mcpTools) → 合并 MCP 工具 + 去重
+ *
+ * 我们简化为一个 Map + register/get/getAll 三个方法。
+ */
+export class ToolRegistry {
+  private tools: Map<string, Tool> = new Map();
+
+  /**
+   * 注册一个工具。
+   * 对应 Claude Code: getAllBaseTools() 数组中的每一项
+   */
+  register(tool: Tool): void {
+    if (this.tools.has(tool.name)) {
+      throw new Error(`Tool already registered: ${tool.name}`);
+    }
+    this.tools.set(tool.name, tool);
+  }
+
+  /**
+   * 按名称获取工具。
+   * 对应 Claude Code: findToolByName()（src/Tool.ts 第 358-360 行）
+   */
+  get(name: string): Tool | undefined {
+    return this.tools.get(name);
+  }
+
+  /**
+   * 获取所有已注册工具。
+   * 对应 Claude Code: getTools()（src/tools.ts 第 271-327 行）
+   */
+  getAll(): Tool[] {
+    return Array.from(this.tools.values());
+  }
 }
