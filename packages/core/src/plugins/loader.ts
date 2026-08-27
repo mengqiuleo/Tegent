@@ -1,146 +1,347 @@
-// 扫描 ~/.tegent/plugins/cache/<name>/.tegent-plugin/plugin.json 和
-// <repo-root>/.tegent/plugins/<name>/.tegent-plugin/plugin.json，把每个带合法清单的
-// 目录加载成一个 PluginDefinition。目录布局对齐 Claude Code 插件：
+// CLI 入口会调用这个一次性编排。加载分两轮：
 //
-//   <plugins-root>/<name>/
-//     .tegent-plugin/plugin.json   ← 清单，必须有
-//     skills/<skill-name>/SKILL.md ← 可选：贡献给 skill 注册表
-//     agents/<agent>.md            ← 可选：贡献给子代理注册表（暂未接入）
+//   第 1 轮 —— 从 installed_plugins.json 读取 user-scope 安装记录。每条记录都指向
+//              一个带版本号的缓存目录；记录写的是哪个版本，我们就加载哪个版本。
+//              如果账本记录存在但缓存目录缺失，会收集为 PluginLoadError。
 //
-// 优先级：同 id 插件里，项目级会覆盖用户级（注册表后写覆盖）。
-// 约束：坏清单只打印警告并跳过，单个损坏的 plugin.json 不能导致 CLI 崩溃。
+//   第 2 轮 —— 扫描 <cwd>/.tegent/plugins/<name>/ 下的项目本地插件。
+//              它们不记录在 installed_plugins.json 中，因为它们作为仓库内插件被提交。
+//              这类插件的 marketplace 名统一是 "local"。
+//
+// `installed_plugins.json` 是 user-scope 安装的事实来源。孤立缓存目录（有目录但无
+// 账本记录）会被静默忽略，等用户下次运行 `/plugin uninstall` 时再清理。
+//
+// 单个坏插件（JSON 错误、缺少 manifest、schema 不合法）绝不能中止启动；
+// 错误会进入 `PluginLoadError[]`，后续由 `/plugin doctor` 展示。
+//
+// 返回的 `PluginRegistry` 设计上会在会话内冻结使用，和 MCP / skills 一样遵守
+// CLAUDE.md 中的字节稳定性约束。CLI 启动时调用一次 `loadAllPlugins()`，并把结果
+// 放入 `AgentOptions`。`/plugin refresh` 会通过 `registry.reload(...)` 原地替换
+// 内存状态，并让 `systemPromptCache` 失效。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-import { z } from 'zod'
+import { EnableState } from './enable-state.js'
+import { listInstalledPlugins } from './installer.js'
+import { ManifestParseError, discoverManifest, parseManifest } from './manifest.js'
+import { pluginCacheDir, projectPluginsDir } from './paths.js'
+import { PluginRegistry } from './registry.js'
+import type {
+  InlineHookConfig,
+  InlineMcpServers,
+  LoadedPlugin,
+  PluginLoadError,
+  PluginManifest,
+  PluginScope,
+  PluginSource,
+} from './types.js'
 
-import { formatPluginId, isValidPluginName, pluginCacheDir, pluginManifestPath, projectPluginsDir } from './utils.js'
-import type { PluginDefinition, PluginSource } from './types.js'
-
-const manifestSchema = z.object({
-  name: z.string().min(1).refine(isValidPluginName, 'plugin name must be a valid npm-style name'),
-  version: z.string().min(1),
-  description: z.string().optional(),
-  author: z.string().optional(),
-  marketplace: z.string().optional(),
-})
-
-export interface LoadPluginsOptions {
+export interface LoadOptions {
+  /** 当前工作目录，用于寻找项目本地插件。 */
+  cwd: string
   /**
-   * 覆盖用户级插件缓存目录。
+   * 是否完全跳过插件加载。
    *
-   * 默认是 `~/.tegent/plugins/cache`。测试通过这里把扫描指到临时目录，
-   * 避免读到开发机上真实安装的插件。
+   * 由启动参数 `--no-plugins` 驱动；为 true 时返回空 registry 和空贡献映射。
    */
-  userDir?: string
+  disabled?: boolean
+}
 
+export interface LoadResult {
+  registry: PluginRegistry
   /**
-   * 覆盖项目级插件目录。
+   * 每个插件解析后的贡献项路径 / 内联对象。
    *
-   * 默认是 `<repo-root>/.tegent/plugins`。测试同样通过这里注入临时目录。
+   * skill / agent / mcp 等下游 loader 集成会读取这里，把插件贡献的内容合并进去。
+   * Map 以 plugin id 为 key。
    */
-  projectDir?: string
+  contributions: Map<string, ResolvedContributions>
 }
 
 /**
- * 解析单个清单 JSON 文本。
+ * 单个插件 manifest 贡献项解析后的形状。
  *
- * @param raw - plugin.json 的原始文本。
- * @returns 解析成功时返回清洗后的清单对象；JSON 语法错误或结构不符时返回 `null`。
+ * 相对路径会基于 `rootDir` 解析成绝对路径。`mcpServers` 和 `hooks` 的 `path` /
+ * `inline` 判别字段对应 manifest 中的联合类型：插件作者既可以指向文件，也可以
+ * 直接内联配置对象。
  */
-async function parseManifestFile(raw: string): Promise<z.infer<typeof manifestSchema> | null> {
-  let parsed: unknown
+export interface ResolvedContributions {
+  /**
+   * 插件 skills 目录的绝对路径。
+   *
+   * 目录下每个子目录都应遵循现有 `<name>/SKILL.md` 布局，这样 skill loader
+   * 无需特殊逻辑即可扫描。
+   */
+  skillsDir?: string
+  /** 插件 sub-agent `.md` 文件目录的绝对路径。 */
+  agentsDir?: string
+  /** 插件 slash-command `.md` 文件目录的绝对路径。 */
+  commandsDir?: string
+  /**
+   * mcpServers 贡献项。
+   *
+   * 可以是指向 `{ mcpServers: { ... } }` JSON 文件的路径，也可以是和
+   * ~/.tegent/config.json `mcpServers` 形状一致的内联记录。
+   */
+  mcpServers?: { kind: 'path'; path: string } | { kind: 'inline'; data: InlineMcpServers }
+  /**
+   * hooks 贡献项。
+   *
+   * 可以是 hooks.json 路径，也可以是内联对象；schema 校验位于
+   * packages/core/src/hooks。
+   */
+  hooks?: { kind: 'path'; path: string } | { kind: 'inline'; data: InlineHookConfig }
+}
+
+/**
+ * 加载当前环境中的全部插件。
+ *
+ * 函数先加载已安装插件账本，再扫描项目本地插件；所有成功加载的插件进入 registry，
+ * 每个插件解析后的贡献项进入 contributions。坏插件只记录错误，不阻塞其他插件。
+ *
+ * @param opts 加载选项，包含工作目录和是否禁用插件。
+ * @returns 插件注册表以及按 plugin id 索引的贡献项映射。
+ */
+export async function loadAllPlugins(opts: LoadOptions): Promise<LoadResult> {
+  if (opts.disabled) {
+    return { registry: new PluginRegistry([], []), contributions: new Map() }
+  }
+
+  const enableState = await EnableState.load(opts.cwd)
+  const plugins: LoadedPlugin[] = []
+  const errors: PluginLoadError[] = []
+  const contributions = new Map<string, ResolvedContributions>()
+
+  // ── 第 1 轮：user-scope 已安装插件 ───────────────────────────────────
+  const installed = await listInstalledPlugins()
+  for (const record of installed) {
+    const rootDir = pluginCacheDir(record.marketplace, record.name, record.version)
+    await loadOnePlugin({
+      rootDir,
+      fallbackId: record.id,
+      marketplace: record.marketplace,
+      scope: record.installScope,
+      source: record.source,
+      enableState,
+      plugins,
+      errors,
+      contributions,
+    })
+  }
+
+  // ── 第 2 轮：项目本地插件 ───────────────────────────────────────────
+  const projectRoot = projectPluginsDir(opts.cwd)
+  let projectEntries: import('node:fs').Dirent[] = []
   try {
-    parsed = JSON.parse(raw)
+    projectEntries = await fs.readdir(projectRoot, { withFileTypes: true })
   } catch {
-    return null
+    /* 没有项目插件目录是最常见路径，直接跳过。 */
   }
-  const result = manifestSchema.safeParse(parsed)
-  return result.success ? result.data : null
+  for (const entry of projectEntries) {
+    if (!entry.isDirectory()) continue
+    const pluginRoot = path.join(projectRoot, entry.name)
+    await loadOnePlugin({
+      rootDir: pluginRoot,
+      // 先用目录名构造临时 id；manifest 解析成功后会由 manifest.name 覆盖。
+      fallbackId: `${entry.name}@local`,
+      marketplace: 'local',
+      scope: 'project',
+      source: undefined,
+      enableState,
+      plugins,
+      errors,
+      contributions,
+    })
+  }
+
+  return { registry: new PluginRegistry(plugins, errors), contributions }
+}
+
+interface LoadOneArgs {
+  rootDir: string
+  fallbackId: string
+  marketplace: string
+  scope: PluginScope
+  source: PluginSource | undefined
+  enableState: EnableState
+  plugins: LoadedPlugin[]
+  errors: PluginLoadError[]
+  contributions: Map<string, ResolvedContributions>
 }
 
 /**
- * 从指定插件根目录加载单个插件。
+ * 尝试加载单个插件目录。
  *
- * @param pluginDir - 插件根目录（形如 `<root>/<name>`）。
- * @param source - 插件来源，用于 UI 展示和优先级判断。
- * @returns 加载成功返回插件定义；目录里没有清单或清单坏了返回 `undefined`。
+ * 函数负责 manifest 发现、manifest 解析、启用状态解析、LoadedPlugin 构造以及
+ * 贡献项解析。任何异常都会转换为 `PluginLoadError` 并写入 args.errors。
+ *
+ * @param args 单插件加载所需的上下文和可变输出数组 / Map。
  */
-async function loadPlugin(
-  pluginDir: string,
-  source: PluginSource,
-): Promise<PluginDefinition | undefined> {
-  const manifestPath = pluginManifestPath(pluginDir)
-
-  let raw: string
+async function loadOnePlugin(args: LoadOneArgs): Promise<void> {
   try {
-    raw = await fs.readFile(manifestPath, 'utf-8')
-  } catch {
-    // 没有 plugin.json 就不是插件：缓存目录里允许有临时目录、checkouts 等杂物，静默跳过。
-    return undefined
-  }
+    const discovery = await discoverManifest(args.rootDir)
+    if (!discovery) {
+      args.errors.push({
+        id: args.fallbackId,
+        path: args.rootDir,
+        message:
+          'no plugin manifest found (looked for .tegent-plugin/plugin.json, .claude-plugin/plugin.json, plugin.json)',
+      })
+      return
+    }
+    if (discovery.format === 'gemini') {
+      args.errors.push({
+        id: args.fallbackId,
+        path: args.rootDir,
+        message: 'Gemini extensions are not supported (gemini-extension.json detected); see docs/plugins.md',
+      })
+      return
+    }
 
-  const manifest = await parseManifestFile(raw)
-  if (!manifest) {
-    console.error(`[plugins] Skipping ${manifestPath}: invalid or corrupted plugin.json`)
-    return undefined
-  }
+    let manifest: PluginManifest
+    try {
+      manifest = await parseManifest(discovery.manifestPath)
+    } catch (err) {
+      args.errors.push({
+        id: args.fallbackId,
+        path: args.rootDir,
+        message: err instanceof ManifestParseError ? err.message : String(err),
+      })
+      return
+    }
 
-  return {
-    id: formatPluginId(manifest.name, manifest.marketplace),
-    name: manifest.name,
-    version: manifest.version,
-    source,
-    dir: pluginDir,
-    manifestPath,
-    ...(manifest.description ? { description: manifest.description } : {}),
-    ...(manifest.author ? { author: manifest.author } : {}),
-    ...(manifest.marketplace ? { marketplace: manifest.marketplace } : {}),
+    // 规范 id 永远来自 manifest，而不是缓存目录名。
+    // 对已安装插件来说它通常和账本 id 一致；对项目本地插件来说，它可能和目录名不同，
+    // 此时 manifest.name 拥有最高优先级。
+    const id = `${manifest.name}@${args.marketplace}`
+    const enableResolution = args.enableState.resolve(id)
+
+    const plugin: LoadedPlugin = {
+      id,
+      manifest,
+      rootDir: args.rootDir,
+      manifestPath: discovery.manifestPath,
+      manifestFormat: discovery.format,
+      source: args.source,
+      marketplace: args.marketplace,
+      scope: args.scope,
+      enabled: enableResolution.enabled,
+    }
+    args.plugins.push(plugin)
+    args.contributions.set(id, await resolveContributions(plugin))
+  } catch (err) {
+    args.errors.push({
+      id: args.fallbackId,
+      path: args.rootDir,
+      message: err instanceof Error ? err.message : String(err),
+    })
   }
 }
 
 /**
- * 从指定根目录加载全部插件。
+ * 把插件 manifest 中的贡献字段解析为绝对路径或内联对象。
  *
- * 只把“子目录里有合法清单”的条目当作插件；普通文件、无清单目录直接跳过。
- * 单个插件解析失败时只跳过该插件，不会中断其他插件加载，这样一个坏清单不会拖垮整个 CLI。
+ *  它被导出是因为少数调用方偶尔需要针对单个插件重新计算贡献项，例如
+ *  `/plugin info`。
  *
- * @param dir - 要扫描的插件根目录（用户缓存目录或项目插件目录）。
- * @param source - 插件来源，用于 UI 展示和优先级判断。
- * @returns 从该目录成功加载出来的插件定义列表。
+ *  每类贡献项都有两轮发现：
+ *
+ *  1. manifest 显式声明：如果 manifest 写了路径，例如 `"skills": "./my-skills"`，
+ *     就直接使用该路径。
+ *  2. 约定式回退：如果没有声明，则探测约定目录（`skills/`、`agents/`、
+ *     `commands/`）和约定文件（`hooks/hooks.json`、`.mcp.json`、`mcp.json`）。
+ *     真实 Claude Code 插件常这么做：manifest 只写 name / version / description，
+ *     贡献项则放在旁边的约定位置。
+ *
+ *  这个函数是 async，因为约定式探测需要 stat 文件和目录。
+ *
+ * @param plugin 已加载插件对象。
+ * @returns 解析后的贡献项集合。
  */
-async function loadPluginsFromDir(dir: string, source: PluginSource): Promise<PluginDefinition[]> {
-  const plugins: PluginDefinition[] = []
+export async function resolveContributions(plugin: LoadedPlugin): Promise<ResolvedContributions> {
+  const m = plugin.manifest
+  const root = plugin.rootDir
+  const result: ResolvedContributions = {}
 
-  let entries: import('node:fs').Dirent[]
+  // skills / agents / commands 都是目录类贡献项。
+  if (m.skills) {
+    result.skillsDir = path.resolve(root, m.skills)
+  } else if (await isDir(path.join(root, 'skills'))) {
+    result.skillsDir = path.join(root, 'skills')
+  }
+  if (m.agents) {
+    result.agentsDir = path.resolve(root, m.agents)
+  } else if (await isDir(path.join(root, 'agents'))) {
+    result.agentsDir = path.join(root, 'agents')
+  }
+  if (m.commands) {
+    result.commandsDir = path.resolve(root, m.commands)
+  } else if (await isDir(path.join(root, 'commands'))) {
+    result.commandsDir = path.join(root, 'commands')
+  }
+
+  // mcpServers 可以来自 manifest 显式声明（path / inline），也可以来自约定文件。
+  if (m.mcpServers !== undefined) {
+    if (typeof m.mcpServers === 'string') {
+      result.mcpServers = { kind: 'path', path: path.resolve(root, m.mcpServers) }
+    } else {
+      result.mcpServers = { kind: 'inline', data: m.mcpServers }
+    }
+  } else {
+    // Claude Code 约定是在插件根目录放 `.mcp.json`。
+    // 我们也接受无点号的 `mcp.json`，作为务实 fallback；有些作者更喜欢可见文件名。
+    for (const conv of ['.mcp.json', 'mcp.json']) {
+      const p = path.join(root, conv)
+      if (await isFile(p)) {
+        result.mcpServers = { kind: 'path', path: p }
+        break
+      }
+    }
+  }
+
+  // hooks 使用同样模式，约定文件是 `hooks/hooks.json`。
+  if (m.hooks !== undefined) {
+    if (typeof m.hooks === 'string') {
+      result.hooks = { kind: 'path', path: path.resolve(root, m.hooks) }
+    } else {
+      result.hooks = { kind: 'inline', data: m.hooks }
+    }
+  } else {
+    const conv = path.join(root, 'hooks', 'hooks.json')
+    if (await isFile(conv)) {
+      result.hooks = { kind: 'path', path: conv }
+    }
+  }
+
+  return result
+}
+
+/**
+ * 判断路径是否是目录。
+ *
+ * @param p 待检查路径。
+ * @returns 存在且是目录时为 true，否则为 false。
+ */
+async function isDir(p: string): Promise<boolean> {
   try {
-    entries = await fs.readdir(dir, { withFileTypes: true })
+    const s = await fs.stat(p)
+    return s.isDirectory()
   } catch {
-    return plugins // 目录不存在（最常见）或不可读：按“没有插件”处理。
+    return false
   }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue // 根目录下的普通文件不是插件。
-    const plugin = await loadPlugin(path.join(dir, entry.name), source)
-    if (plugin) plugins.push(plugin)
-  }
-
-  return plugins
 }
 
 /**
- * 加载当前会话可用的全部插件。
+ * 判断路径是否是普通文件。
  *
- * 按“用户级缓存 → 项目级”顺序加载，注册表里同 id 插件由后者覆盖，
- * 因此项目自带插件可以覆盖 marketplace 安装的同名版本。
- *
- * @param opts 加载选项，主要用于测试注入临时目录。
- * @returns 加载成功的插件定义列表。
+ * @param p 待检查路径。
+ * @returns 存在且是文件时为 true，否则为 false。
  */
-export async function loadPlugins(opts: LoadPluginsOptions = {}): Promise<PluginDefinition[]> {
-  const userPlugins = await loadPluginsFromDir(opts.userDir ?? pluginCacheDir(), 'user')
-  const projectPlugins = await loadPluginsFromDir(opts.projectDir ?? projectPluginsDir(), 'project')
-
-  // 合并顺序：注册表采用“后者覆盖前者”，所以项目级排在用户缓存之后。
-  return [...userPlugins, ...projectPlugins]
+async function isFile(p: string): Promise<boolean> {
+  try {
+    const s = await fs.stat(p)
+    return s.isFile()
+  } catch {
+    return false
+  }
 }

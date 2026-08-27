@@ -6,8 +6,8 @@ import { tool } from 'ai'
 import { z } from 'zod'
 
 import { formatToolError } from '../utils/tool-errors.js'
-import { getRipgrepPath } from './utils.js'
 import { reportProgress } from './progress.js'
+import { getRipgrepPath } from './utils.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -15,8 +15,6 @@ const DEFAULT_HEAD_LIMIT = 250
 const MAX_COLUMNS = 500
 const RG_MAX_BUFFER = 20 * 1024 * 1024
 
-//eg: 确认「哪些地方用到了 formatDate」。它发出一个 grep 工具调用
-/** 按正则表达式搜索文件内容中的匹配行 */
 export const grep = tool({
   description: `A powerful search tool built on ripgrep.
 

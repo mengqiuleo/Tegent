@@ -1,9 +1,20 @@
+// Extracted from tool-execution.ts to keep handleToolCall at a manageable
+// size. Each handler has the same contract: mutate state + push result via
+// pushToolResult, and return void.
 import type { AgentCallbacks, AgentOptions, TodoItem } from '../types/index.js'
 import { extractText } from '../utils/message-helpers.js'
 import type { LoopState } from './loop-state.js'
 import { toolErrorString } from './messages.js'
 import { makePlanFilePath, readPlan, writePlan } from './plan-storage.js'
-import { pushToolResult as defaultPushToolResult, type PushToolResult } from './tool-result.js'
+
+type PushToolResult = (
+  state: LoopState,
+  callbacks: AgentCallbacks,
+  toolCallId: string,
+  toolName: string,
+  output: string,
+  isError?: boolean,
+) => void
 
 function lastUserMessageText(messages: LoopState['messages']): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -15,27 +26,12 @@ function lastUserMessageText(messages: LoopState['messages']): string {
   return ''
 }
 
-export async function handleAskUser(
-  input: Record<string, unknown>,
-  toolCallId: string,
-  state: LoopState,
-  callbacks: AgentCallbacks,
-  // 默认走共享实现；保留参数是为了需要定制落点的调用方（以及测试）能注入。
-  pushToolResult: PushToolResult = defaultPushToolResult,
-): Promise<void> {
-  const question = input.question as string
-  const choices = input.options as Array<{ label: string; description: string }> | undefined
-  const answer = await callbacks.onAskUser(question, choices)
-  pushToolResult(state, callbacks, toolCallId, 'askUser', `User answered: ${answer}`)
-}
-
 export async function handleTodoWrite(
   input: Record<string, unknown>,
   toolCallId: string,
   state: LoopState,
   callbacks: AgentCallbacks,
-  // 默认走共享实现；保留参数是为了需要定制落点的调用方（以及测试）能注入。
-  pushToolResult: PushToolResult = defaultPushToolResult,
+  pushToolResult: PushToolResult,
 ): Promise<void> {
   type RawTodo = { content?: string; activeForm?: string; status?: TodoItem['status'] }
   const raw = (input.todos as RawTodo[] | undefined) ?? []
@@ -83,8 +79,7 @@ export async function handleEnterPlanMode(
   state: LoopState,
   options: AgentOptions,
   callbacks: AgentCallbacks,
-  // 默认走共享实现；保留参数是为了需要定制落点的调用方（以及测试）能注入。
-  pushToolResult: PushToolResult = defaultPushToolResult,
+  pushToolResult: PushToolResult,
 ): Promise<void> {
   if (state.permissionMode === 'plan') {
     pushToolResult(
@@ -119,7 +114,7 @@ export async function handleEnterPlanMode(
     const topic = (input.topic as string | undefined)?.trim()
     const fallbackText = lastUserMessageText(state.messages)
     const explicitSlug = topic && topic.length > 0 ? topic : state.taskSlug || undefined
-    state.currentPlanPath = makePlanFilePath(fallbackText, { slug: (explicitSlug || '') })
+    state.currentPlanPath = makePlanFilePath(fallbackText, { slug: explicitSlug })
   }
   callbacks.onPlanModeChange('plan')
   pushToolResult(
@@ -149,8 +144,7 @@ export async function handleExitPlanMode(
   toolCallId: string,
   state: LoopState,
   callbacks: AgentCallbacks,
-  // 默认走共享实现；保留参数是为了需要定制落点的调用方（以及测试）能注入。
-  pushToolResult: PushToolResult = defaultPushToolResult,
+  pushToolResult: PushToolResult,
 ): Promise<void> {
   if (state.permissionMode !== 'plan') {
     pushToolResult(
@@ -165,7 +159,7 @@ export async function handleExitPlanMode(
   }
   const planPath =
     state.currentPlanPath ??
-    makePlanFilePath(lastUserMessageText(state.messages), { slug: state.taskSlug || '' })
+    makePlanFilePath(lastUserMessageText(state.messages), { slug: state.taskSlug || undefined })
   state.currentPlanPath = planPath
   const planOverride = (input.plan as string | undefined)?.trim()
   let planBody = planOverride ?? ''
