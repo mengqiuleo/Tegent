@@ -139,6 +139,9 @@ async function runTurn(
     ...(options.skillRegistry && options.skillRegistry.names().length > 0
       ? { activateSkill: createActivateSkillTool(options.skillRegistry) }
       : {}),
+    // MCP 工具来自外部 Server，注册表在会话启动时填充好。条目不带 execute，
+    // 执行走 processToolCalls 的手动分支，权限闸门对非只读工具照常生效。
+    ...(options.mcpRegistry ? options.mcpRegistry.toToolSet() : {}),
   }
 
   let result: StreamResult

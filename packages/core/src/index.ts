@@ -5,7 +5,7 @@ export type { LoopState } from './agent/loop.js'
 export { createModelRegistry } from './providers/registry.js'
 
 // Config
-export { getAvailableProviders, getEnvVarName, resolveModelId } from './config/index.js'
+export { getAvailableProviders, getEnvVarName, getMcpConfigPath, loadMcpServers, resolveModelId } from './config/index.js'
 
 // type
 export { PROVIDER_DETECTION_ORDER, PROVIDER_KEY_URLS } from './types/index.js'
@@ -24,6 +24,12 @@ export {
 export { loadPersistedRules, persistRule } from './permissions/index.js'
 export type { AllowRule } from './permissions/session-store.js'
 
+
+// MCP
+export { ToolRegistry } from './types/index.js'
+export { registerMcpServers, closeMcpServers } from './mcp/index.js'
+export type { McpServerConfig, ConnectedMcpServer } from './mcp/client.js'
+export type { Tool as McpTool, ToolResult as McpToolResult } from './mcp/type.js'
 
 // Skills
 export {

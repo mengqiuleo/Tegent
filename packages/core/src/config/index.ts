@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import { MODEL_ALIASES, PROVIDER_DETECTION_ORDER } from '../types/index.js'
 import type { BuiltInProviderName, ModelId, ProviderName } from '../types/index.js'
+import type { McpServerConfig } from '../mcp/client.js'
 
 export const ENV_MAP: Record<BuiltInProviderName, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -64,6 +65,40 @@ export function saveUserConfig(update: Partial<UserConfig>): void {
     fsSync.writeFileSync(getUserConfigPath(), JSON.stringify(merged, null, 2) + '\n', 'utf-8')
   } catch {
 
+  }
+}
+
+/** MCP Server 配置文件路径：.tegent/mcp.json（跟 config.json 同目录，随项目走）。 */
+export function getMcpConfigPath(): string {
+  return path.join(userTeCodeDir(), 'mcp.json')
+}
+
+/**
+ * 读取 .tegent/mcp.json，外层格式与 Claude Code 的 .mcp.json 对齐：
+ *
+ *   { "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } } }
+ *
+ * 解析失败静默返回空对象 —— MCP 是增强能力，配置坏了不该拖垮 Agent 启动；
+ * 单条服务器配置缺 command 字段时跳过该条并提示。
+ */
+export function loadMcpServers(): Record<string, McpServerConfig> {
+  try {
+    const raw = fsSync.readFileSync(getMcpConfigPath(), 'utf-8')
+    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, unknown> }
+    const servers = parsed?.mcpServers
+    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return {}
+
+    const result: Record<string, McpServerConfig> = {}
+    for (const [name, cfg] of Object.entries(servers)) {
+      if (typeof cfg === 'object' && cfg !== null && typeof (cfg as { command?: unknown }).command === 'string') {
+        result[name] = cfg as McpServerConfig
+      } else {
+        console.warn(`[MCP] 忽略无效的服务器配置 "${name}"：缺少 command 字段`)
+      }
+    }
+    return result
+  } catch {
+    return {}
   }
 }
 

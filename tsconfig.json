@@ -1,5 +1,15 @@
 {
   // Visit https://aka.ms/tsconfig to read more about this file
+  // solution-style 根配置：这份文件同时作各 packages/*/tsconfig.json 的 extends 基座。
+  // 注意 compilerOptions 里 outDir 被注释掉、declaration 全开 —— 若直接把它当编译
+  // 单元用（根目录裸跑 tsc 而无 references），会把 .js/.d.ts 发射到源码旁边。
+  // files: [] + references 后，根目录 `tsc -b` 走各包自己的 tsconfig（带 outDir），
+  // 既是从根构建的入口，也杜绝误发射；子配置声明了自己的 include，不受影响。
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/cli" }
+  ],
   "compilerOptions": {
     // File Layout
     // "rootDir": "./src",

@@ -1,4 +1,5 @@
-import type { LanguageModel } from 'ai'
+import { jsonSchema } from 'ai'
+import type { LanguageModel, ToolSet } from 'ai'
 
 import type { z } from 'zod'
 import type { EditDiffPayload } from '../agent/diff.js'
@@ -99,6 +100,11 @@ export interface AgentOptions {
   // 注册表对象在整个会话内保持身份不变，/skill refresh 通过原地 reload 更新内容，
   // 因此这里缓存引用是安全的。子代理通过 ...parentOptions 展开自然继承。
   skillRegistry?: SkillRegistry
+  // 会话级 MCP 工具注册表。启动时由 registerMcpServers 连接各 Server 并填充
+  //（连不上的自动跳过，不拖垮启动）；loop 每轮用 toToolSet() 合并进工具列表，
+  // 执行走 processToolCalls 的手动分支，非只读工具照样过权限闸门。
+  // 子代理通过 ...parentOptions 展开自然继承。
+  mcpRegistry?: ToolRegistry
   modelRegistry?: {
     languageModel: (id: `${string}:${string}`) => LanguageModel
   }
@@ -213,7 +219,7 @@ export const PROVIDER_KEY_URLS: Record<BuiltInProviderName, string> = {
  *   getTools(permCtx) → 过滤 deny 规则 + isEnabled 检查
  *   assembleToolPool(permCtx, mcpTools) → 合并 MCP 工具 + 去重
  *
- * 我们简化为一个 Map + register/get/getAll 三个方法。
+ * 我们简化为一个 Map + register/get/getAll/toToolSet 四个方法。
  */
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -243,5 +249,25 @@ export class ToolRegistry {
    */
   getAll(): Tool[] {
     return Array.from(this.tools.values());
+  }
+
+  /**
+   * 转成 AI SDK 的 ToolSet，供 streamText 的 tools 参数使用。
+   *
+   * 刻意不生成 execute：MCP 工具要走 processToolCalls 的手动执行分支，
+   * 非只读工具才能过权限闸门（AI SDK 的自动执行会绕开这层检查），
+   * 进度回报和 isError 处理也和 writeFile/shell 保持一致。
+   */
+  toToolSet(): ToolSet {
+    const set: Record<string, { description: string; inputSchema: ReturnType<typeof jsonSchema> }> = {}
+    for (const tool of this.tools.values()) {
+      set[tool.name] = {
+        description: tool.description,
+        // 本地 ToolInputSchema 带 unknown 索引签名，直接赋给 JSONSchema7 会因
+        // 可选属性不兼容报错，这里收窄一次；运行时就是透传同一个对象。
+        inputSchema: jsonSchema(tool.inputSchema as Parameters<typeof jsonSchema>[0]),
+      }
+    }
+    return set as ToolSet
   }
 }

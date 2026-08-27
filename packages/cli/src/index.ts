@@ -3,10 +3,14 @@ import chalk from 'chalk'
 
 import {
   PROVIDER_DETECTION_ORDER,
+  ToolRegistry,
+  closeMcpServers,
   createModelRegistry,
   createSkillRegistry,
   getAvailableProviders,
   getEnvVarName,
+  loadMcpServers,
+  registerMcpServers,
   resolveModelId,
 } from '@tegent/core'
 import type { AgentOptions } from '@tegent/core'
@@ -80,10 +84,16 @@ async function main() {
   // loop 每轮从它重建 activateSkill 工具，因此 /skill refresh 原地 reload 后立即生效。
   const skillRegistry = await createSkillRegistry()
 
+  // MCP：读 .tegent/mcp.json，逐个连接 Server 并把工具注册进会话注册表。
+  // 连接失败的服务器在 registerMcpServers 内部 fail-soft，只打警告不阻塞启动流程之外的主逻辑。
+  const mcpRegistry = new ToolRegistry()
+  const mcpServers = await registerMcpServers(mcpRegistry, loadMcpServers())
+
   const options: AgentOptions = {
     modelId,
     trustMode: argv.trust,
     skillRegistry,
+    mcpRegistry,
     ...(argv['max-turns'] !== undefined ? { maxTurns: argv['max-turns'] } : {}),
   }
 
@@ -93,6 +103,9 @@ async function main() {
 
   // 卸载后补一次清理（保存会话）；/exit 路径已经在 App 里清理过，这里幂等兜底。
   await getCleanupFn()?.()
+
+  // 关掉所有 MCP 子进程，别让 stdio Server 活得比 CLI 久。
+  await closeMcpServers(mcpServers)
 }
 
 main().catch((err) => {

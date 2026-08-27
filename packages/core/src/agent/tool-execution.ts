@@ -5,7 +5,8 @@ import type { LanguageModel } from 'ai'
 
 import type { LoopState } from './loop-state.js'
 import { handleAskUser, handleEnterPlanMode, handleExitPlanMode, handleTodoWrite } from './plan-tools.js'
-import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMessage } from './messages.js'
+import { isToolErrorString, toolErrorFromUnknown, toolErrorString } from './messages.js'
+import { pushToolResult } from './tool-result.js'
 import { truncateToolResult } from '../tools/index.js'
 import { clearProgressReporter, reportProgress } from '../tools/progress.js'
 import { getShellProvider } from '../tools/shell-provider.js'
@@ -18,19 +19,6 @@ type ToolCall = {
   toolName: string
   toolCallId: string
   input: Record<string, unknown>
-}
-
-function pushToolResult(
-  state: LoopState,
-  callbacks: AgentCallbacks,
-  toolCallId: string,
-  toolName: string,
-  output: string,
-  isError = false,
-): void {
-  state.messages.push(toolResultMessage(toolCallId, toolName, output))
-  clearProgressReporter(toolCallId)
-  callbacks.onToolResult(toolCallId, output, isError)
 }
 
 function collectFulfilledToolCallIds(state: LoopState): Set<string> {
@@ -259,6 +247,49 @@ async function handleToolCall(
       reportProgress(tc.toolCallId, 'Running command...')
       const result = await runShellCommand(command, timeout, callbacks, tc.toolCallId, options.abortSignal)
       pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, result.output, result.isError)
+      return
+    }
+
+    // MCP 工具：注册表里按名字查得到就走一次远程 tools/call。
+    const mcpTool = options.mcpRegistry?.get(tc.toolName)
+    if (mcpTool) {
+      // Server 自述只读（readOnlyHint）的直接放行；其余一律过权限闸门 ——
+      // 未知工具在权限分类器里默认 ask，正好落到“询问用户”。
+      if (!mcpTool.isReadOnly) {
+        const approved = await checkPermission(
+          { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
+          options.trustMode,
+          callbacks.onAskPermission,
+          state.permissionMode,
+          process.cwd(),
+        )
+        if (options.abortSignal?.aborted) {
+          pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, '[Tool execution interrupted by user]', true)
+          return
+        }
+        if (!approved) {
+          pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, 'Permission denied by user.')
+          return
+        }
+      }
+
+      reportProgress(tc.toolCallId, `Calling ${tc.toolName}`)
+      const result = await mcpTool.execute(tc.input, process.cwd())
+      pushToolResult(state, callbacks, tc.toolCallId, tc.toolName, truncateToolResult(result.content), result.isError)
+      return
+    }
+
+    // 名字带 mcp__ 前缀但注册表里查不到：Server 没配置、连接失败或工具已下线。
+    // 明确回一条错误结果，不留孤立 tool-call 等下一轮 repair 兜底。
+    if (tc.toolName.startsWith('mcp__')) {
+      pushToolResult(
+        state,
+        callbacks,
+        tc.toolCallId,
+        tc.toolName,
+        `MCP tool "${tc.toolName}" is not available (server not configured, disconnected, or the tool was removed).`,
+        true,
+      )
       return
     }
   } catch (err) {
