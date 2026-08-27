@@ -1,3 +1,5 @@
+import { type LoadPluginsOptions, loadPlugins } from './loader.js'
+import { loadDisabledPluginsSet } from './settings.js'
 import type { PluginDefinition, PluginEntry, PluginReloadSummary } from './types.js'
 
 /**
@@ -153,4 +155,33 @@ export class PluginRegistry {
   listAll(): PluginEntry[] {
     return [...this.byId.values()] // 直接返回内部条目的数组副本。
   }
+}
+
+/**
+ * 创建并初始化插件注册表。
+ *
+ * @param opts - 插件加载选项，测试用于注入临时目录。
+ * @returns 加载完成的 `PluginRegistry` 实例。
+ */
+export async function createPluginRegistry(opts: LoadPluginsOptions = {}): Promise<PluginRegistry> {
+  const [plugins, disabled] = await Promise.all([loadPlugins(opts), loadDisabledPluginsSet()]) // 并行读取插件列表和禁用集合。
+  return new PluginRegistry(plugins, disabled) // 用加载结果创建注册表。
+}
+
+/**
+ * 重新扫描插件目录和 settings 文件，并原地刷新给定注册表。
+ *
+ * @param registry - 要被原地刷新的注册表对象。
+ * @param opts - 插件加载选项，测试用于注入临时目录。
+ * @returns 和刷新前相比的变更摘要。
+ *
+ * 调用方负责让依赖插件贡献内容的下游注册表（例如 skill 注册表）失效重建。
+ * 未来的 `/plugin refresh` handler 在接入时会同时刷新两者。
+ */
+export async function reloadPluginRegistry(
+  registry: PluginRegistry,
+  opts: LoadPluginsOptions = {},
+): Promise<PluginReloadSummary> {
+  const [plugins, disabled] = await Promise.all([loadPlugins(opts), loadDisabledPluginsSet()]) // 并行重新读取插件和禁用设置。
+  return registry.reload(plugins, disabled) // 用最新数据原地刷新注册表并返回 diff 摘要。
 }
