@@ -62,12 +62,12 @@ export function formatPluginId(name: string, marketplace?: string): string {
  * 拆开插件 id。
  *
  * @param id - 插件 id（`name` 或 `name@marketplace`）。
- * @returns 名称和可选的 marketplace；id 里有多余 `@` 时只按最后一个切分，
- *   因为插件名本身不允许出现 `@`（见 `isValidPluginName`），多余的 `@`
+ * @returns 名称和可选的 marketplace；id 里出现多个 `@` 时按第一个切分，
+ *   因为插件名本身不允许出现 `@`（见 `isValidPluginName`），其余的 `@`
  *   只可能来自 marketplace 侧。
  */
 export function parsePluginId(id: string): { name: string; marketplace?: string } {
-  const at = id.lastIndexOf('@')
+  const at = id.indexOf('@')
   if (at <= 0) return { name: id } // 没有 @，或 @ 在首位（不是合法 id，按原样返回让调用方处理）。
   return { name: id.slice(0, at), marketplace: id.slice(at + 1) }
 }

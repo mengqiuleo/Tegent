@@ -6,10 +6,12 @@ import {
   ToolRegistry,
   closeMcpServers,
   createModelRegistry,
+  createPluginRegistry,
   createSkillRegistry,
   getAvailableProviders,
   getEnvVarName,
   loadMcpServers,
+  pluginSkillDirs,
   registerMcpServers,
   resolveModelId,
 } from '@tegent/core'
@@ -80,9 +82,19 @@ async function main() {
   const providerRegistry = createModelRegistry()
   const model = providerRegistry.languageModel(modelId)
 
+  // 插件注册表整个进程只创建一次（扫描 ~/.tegent/plugins/cache 和 .tegent/plugins，
+  // 目录不存在时为空）。坏清单在 loader 内部 fail-soft；禁用插件（settings 的
+  // disabledPlugins）在 registry 里过滤，不进入下面的贡献内容换算。
+  const pluginRegistry = await createPluginRegistry()
+  const enabledPlugins = pluginRegistry.list()
+  if (enabledPlugins.length > 0) {
+    console.log(chalk.dim(`Plugins loaded: ${enabledPlugins.map((p) => p.id).join(', ')}`))
+  }
+
   // skill 注册表整个进程只创建一次（扫描 ~/.tegent/skills 和 .tegent/skills）。
+  // 已启用插件贡献的 skills/ 目录作为 extraDirs 并入，优先级：项目级 > 插件级 > 用户级。
   // loop 每轮从它重建 activateSkill 工具，因此 /skill refresh 原地 reload 后立即生效。
-  const skillRegistry = await createSkillRegistry()
+  const skillRegistry = await createSkillRegistry({ extraDirs: pluginSkillDirs(enabledPlugins) })
 
   // MCP：读 .tegent/mcp.json，逐个连接 Server 并把工具注册进会话注册表。
   // 连接失败的服务器在 registerMcpServers 内部 fail-soft，只打警告不阻塞启动流程之外的主逻辑。

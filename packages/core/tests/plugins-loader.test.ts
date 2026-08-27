@@ -105,13 +105,18 @@ describe('loadPlugins', () => {
 
     const plugins = await loadPlugins({ userDir, projectDir })
 
-    // 顺序：先用户级后项目级；PluginRegistry 按“后写覆盖”让项目级 shared 生效。
-    expect(plugins.map((p) => `${p.id}@${p.source}`)).toEqual([
-      'shared@user',
-      'user-only@user',
-      'shared@project',
-      'project-only@project',
-    ])
+    // 契约是“用户级整体先于项目级”（readdir 的目录内顺序没有保证，不影响正确性）：
+    // PluginRegistry 按“后写覆盖”让项目级 shared 覆盖用户缓存里的版本。
+    const labels = plugins.map((p) => `${p.id}@${p.source}`)
+    expect(labels).toHaveLength(4)
+    const lastUser = labels.map((l) => l.endsWith('@user')).lastIndexOf(true)
+    const firstProject = labels.map((l) => l.endsWith('@project')).indexOf(true)
+    expect(lastUser).toBeGreaterThan(-1)
+    expect(firstProject).toBeGreaterThan(-1)
+    expect(lastUser).toBeLessThan(firstProject)
+
+    // 同 id 双份都在列表里，覆盖胜负由注册表决定（见 plugins-registry.test.ts）。
+    expect(labels.filter((l) => l.startsWith('shared@'))).toEqual(['shared@user', 'shared@project'])
   })
 
   it('ignores plain files and directories without a manifest', async () => {

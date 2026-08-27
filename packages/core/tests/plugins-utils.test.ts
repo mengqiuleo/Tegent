@@ -80,7 +80,7 @@ describe('formatPluginId / parsePluginId', () => {
   })
 
   it('splits on the last @ when the marketplace itself contains one', () => {
-    // 插件名不允许 @（见 isValidPluginId），所以多余的 @ 只可能来自 marketplace 侧。
+    // 插件名不允许 @（见 isValidPluginName），所以第一个 @ 之后的都归 marketplace 侧。
     expect(parsePluginId('demo@acme@mirror')).toEqual({ name: 'demo', marketplace: 'acme@mirror' })
   })
 })
