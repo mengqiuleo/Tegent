@@ -42,3 +42,25 @@ export {
 export type { SkillDefinition, SkillEntry, SkillReloadSummary } from './skills/registry.js'
 export { getScopedDisabledSkills, setSkillDisabled, skillSettingsPath } from './skills/settings.js'
 export type { SkillSettingsScope } from './skills/settings.js'
+
+// Plugins
+export { PluginRegistry, createPluginRegistry, reloadPluginRegistry } from './plugins/registry.js'
+export type { PluginDefinition, PluginEntry, PluginManifest, PluginReloadSummary, PluginSource } from './plugins/types.js'
+export { loadPlugins } from './plugins/loader.js'
+export type { LoadPluginsOptions } from './plugins/loader.js'
+export {
+  formatPluginId,
+  isValidPluginName,
+  parsePluginId,
+  pluginCacheDir,
+  pluginManifestPath,
+  projectPluginsDir,
+} from './plugins/utils.js'
+export { pluginSkillDirs } from './plugins/integration.js'
+export {
+  getScopedDisabledPlugins,
+  loadDisabledPluginsSet,
+  pluginSettingsPath,
+  setPluginDisabled,
+} from './plugins/settings.js'
+export type { PluginSettingsScope } from './plugins/settings.js'
