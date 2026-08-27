@@ -1,5 +1,5 @@
-// 交互式 TUI 的根组件：只负责「提交分发 + Ctrl+C/Esc 处理 + 渲染 ChatInput」。
-// 斜杠命令、权限弹窗、模型切换等交互后续在这里扩展。
+// 交互式 TUI 的根组件：只负责「提交分发（斜杠命令 vs agentLoop）+ Ctrl+C/Esc 处理 + 渲染 ChatInput」。
+// 权限弹窗、模型切换等交互后续在这里扩展。
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useApp } from 'ink'
@@ -7,19 +7,24 @@ import { useApp } from 'ink'
 import type { AgentOptions, LanguageModel } from '@tegent/core'
 
 import { useAgent } from '../hooks/use-agent.js'
+import { handleSlashCommand } from '../slash-commands.js'
+import type { CliSession } from '../slash-commands.js'
 import { ChatInput } from './ChatInputInk.js'
 
 interface AppProps {
   model: LanguageModel
   options: AgentOptions
+  /** 会话注册表容器（skill / plugin / MCP），斜杠命令在这里原地更新。 */
+  session: CliSession
   initialPrompt?: string | undefined
   /** 注册退出清理函数（保存会话），供 Ink 卸载后的收尾路径调用。 */
   onCleanupReady?: (fn: () => Promise<void>) => void
 }
 
-export function App({ model, options, initialPrompt, onCleanupReady }: AppProps) {
+export function App({ model, options, session, initialPrompt, onCleanupReady }: AppProps) {
   const { exit } = useApp()
-  const { state, submit, abort, cleanup } = useAgent(model, options)
+  const { state, question, submit, abort, cleanup, pushSystemMessage, answerQuestion } =
+    useAgent(model, options)
 
   // 输入框下方的临时提示；目前只用于 “Press Ctrl+C again to exit” 双击退出提醒。
   const [notice, setNotice] = useState<string | null>(null)
@@ -71,12 +76,22 @@ export function App({ model, options, initialPrompt, onCleanupReady }: AppProps)
     setNotice('Press Ctrl+C again to exit')
   }, [exit, abort, state.isLoading])
 
-  /** 提交用户输入；将来在这里分流斜杠命令。 */
+  /** 提交用户输入：以 / 开头走斜杠命令层，其余直接进 agentLoop。 */
   const handleSubmit = useCallback(
     (text: string) => {
+      if (text.startsWith('/')) {
+        void handleSlashCommand(text, {
+          session,
+          print: pushSystemMessage,
+          submitToAgent: (content) => {
+            void submit(content, { echo: false })
+          },
+        })
+        return
+      }
       void submit(text)
     },
-    [submit],
+    [session, pushSystemMessage, submit],
   )
 
   return (
@@ -88,6 +103,8 @@ export function App({ model, options, initialPrompt, onCleanupReady }: AppProps)
       isLoading={state.isLoading}
       notice={notice}
       errorMessage={state.error}
+      question={question}
+      onAnswer={answerQuestion}
     />
   )
 }

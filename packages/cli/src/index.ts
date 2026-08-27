@@ -20,6 +20,7 @@ import type { AgentOptions } from '@tegent/core'
 import { getCleanupFn, startApp } from './app.js'
 import { parseCliArgs } from './cli-args.js'
 import { printNoApiKeyMessage } from './startup-prints.js'
+import type { CliSession } from './ui/slash-commands.js'
 import { loadEnvFile } from './utils/toolkit.js'
 
 async function main() {
@@ -109,8 +110,18 @@ async function main() {
     ...(argv['max-turns'] !== undefined ? { maxTurns: argv['max-turns'] } : {}),
   }
 
+  // 会话容器：把三个注册表和 MCP 连接收拢成一个对象传进 TUI，
+  // 斜杠命令（/skill、/plugin、/mcp）在 App 里通过它原地更新，
+  // 因此这里的引用在整个进程生命周期保持不变。
+  const session: CliSession = {
+    skillRegistry,
+    pluginRegistry,
+    mcpRegistry,
+    mcpServers,
+  }
+
   // 挂载 Ink TUI；waitUntilExit 在 Ink 卸载（/exit 或双击 Ctrl+C）时 resolve。
-  const waitUntilExit = startApp(model, options, prompt)
+  const waitUntilExit = startApp(model, options, session, prompt)
   await waitUntilExit()
 
   // 卸载后补一次清理（保存会话）；/exit 路径已经在 App 里清理过，这里幂等兜底。

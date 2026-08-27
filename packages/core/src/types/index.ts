@@ -252,6 +252,17 @@ export class ToolRegistry {
   }
 
   /**
+   * 清空所有已注册工具。
+   *
+   * 给 CLI 的 `/mcp refresh` 用：重连前先清掉旧 Server 注册的工具，
+   * 再用 registerMcpServers 重新填充。刻意保持 registry 对象身份不变
+   *（和 SkillRegistry.reload 同一个思路），AgentOptions 里缓存的引用继续有效。
+   */
+  clear(): void {
+    this.tools.clear();
+  }
+
+  /**
    * 转成 AI SDK 的 ToolSet，供 streamText 的 tools 参数使用。
    *
    * 刻意不生成 execute：MCP 工具要走 processToolCalls 的手动执行分支，
