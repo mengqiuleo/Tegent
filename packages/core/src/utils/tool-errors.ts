@@ -179,7 +179,7 @@ export interface AgentOptions {
   // 是否为无交互打印模式。
   printMode: boolean
   // 是否启用 provider 支持的最高 reasoning/thinking 强度。
-  // 由 ~/.x-code/config.json 的 thinking 字段持久化，也可用 /thinking on|off 切换。
+  // 由 ~/.tegent/config.json 的 thinking 字段持久化，也可用 /thinking on|off 切换。
   thinking?: boolean
   // 会话初始权限模式。未传时默认为 default。
   // CLI 的 --plan 或用户配置会设置它。

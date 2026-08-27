@@ -78,7 +78,7 @@ const manifestSchema = z.object({
 
   userConfig: z.array(userConfigItemSchema).optional(),
   dependencies: z.array(z.string().min(1)).optional(),
-  engines: z.object({ 'x-code': z.string().optional() }).optional(),
+  engines: z.object({ 'tegent': z.string().optional() }).optional(),
 })
 
 // ── manifest 发现 ─────────────────────────────────────────────────────

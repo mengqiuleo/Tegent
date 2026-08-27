@@ -76,10 +76,10 @@ function renderExistingMemory(): string {
   const sections: string[] = []
 
   // 没有内容时写 `(empty)`，明确告诉模型“这个作用域目前为空”。
-  sections.push(`## User (~/.x-code/memory/auto.md)\n${user || '(empty)'}`)
+  sections.push(`## User (~/.tegent/memory/auto.md)\n${user || '(empty)'}`)
 
   // 项目级同理，告诉模型当前项目 auto-memory 里已经有什么。
-  sections.push(`## Project (.x-code/memory/auto.md)\n${project || '(empty)'}`)
+  sections.push(`## Project (.tegent/memory/auto.md)\n${project || '(empty)'}`)
 
   // 用空行分隔 user/project 两块，作为 prompt 的 Existing memory 区域。
   return sections.join('\n\n')
@@ -291,9 +291,6 @@ async function doExtract(args: RunMemoryExtractorArgs): Promise<void> {
   // 这会多花几百个 prompt token，但比让记忆文件无限长出重复 key 便宜得多。
   // existing 会被放进 USER_TEMPLATE 的 Existing memory 区域。
   const existing = renderExistingMemory()
-
-  // debugLog 只有 DEBUG_STDOUT=1 时才写日志；这里记录输入规模，方便排查抽取成本。
-  debugLog('memory-extractor.start', `transcript-bytes=${transcript.length} existing-bytes=${existing.length}`)
 
   // 记录开始时间，done 日志里会输出耗时。
   const startTime = Date.now()

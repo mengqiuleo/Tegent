@@ -95,7 +95,7 @@ User: "What files handle routing?"
       .max(60)
       .optional()
       .describe(
-        'STRONGLY RECOMMENDED. A 3-5 word English filename slug summarizing the user\'s task. Lowercase, hyphen-separated, no spaces or special chars. The plan file is named `<topic>-<YYYYMMDD-HHMMSS>.md` so this makes the file identifiable in `ls .x-code/plans/`. Translate non-English requests into English keywords (e.g. user asks "重构这个项目" → topic: "refactor-x-code-cli"; user asks "加 OAuth 登录" → topic: "add-oauth-login"). Omit only when you genuinely cannot summarize — the file then falls back to timestamp-only naming.',
+        'STRONGLY RECOMMENDED. A 3-5 word English filename slug summarizing the user\'s task. Lowercase, hyphen-separated, no spaces or special chars. The plan file is named `<topic>-<YYYYMMDD-HHMMSS>.md` so this makes the file identifiable in `ls .tegent/plans/`. Translate non-English requests into English keywords (e.g. user asks "重构这个项目" → topic: "refactor-tegent"; user asks "加 OAuth 登录" → topic: "add-oauth-login"). Omit only when you genuinely cannot summarize — the file then falls back to timestamp-only naming.',
       ),
   }),
 })

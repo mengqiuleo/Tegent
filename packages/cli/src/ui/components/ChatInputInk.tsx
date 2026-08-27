@@ -1,190 +1,530 @@
-// ChatInput：负责「消息区 + 交互问题弹层 + 输入框」三块。
-// 键盘只处理基础的输入、退格、左右移动、Enter 提交、Esc 中断、Ctrl+C；
-// 有挂起问题（权限确认/计划审批/askUser）时切换到问题交互：候选选择或自由输入。
-import { useEffect, useMemo, useState } from "react";
+// 已实现功能：slash 补全、输入历史、权限弹窗、SelectOptions、Esc 中断、
+// Ctrl+C 中断、普通文本输入、普通粘贴、Enter 提交、Backspace 删除、
+// Delete 删除、左右移动光标、Home/End 跳转、上下移动光标、PageUp/PageDown 跳转。
+// 未实现功能：@ 文件补全、大段粘贴折叠成引用、Alt+Enter 换行、
+// Ctrl+Enter 换行、粘贴引用占位符删除、@ 补全菜单关闭记忆。
+// 区别只在渲染策略：这里用 Ink 的 <Box>/<Text> 直接渲染，不再使用原版的
+// cell-level diff + process.stdout.write 精细绘制。
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
-import { Box, Text, useInput, useStdin } from "ink";
-import type { Key } from "ink";
+import { Box, Text, useInput, useStdout } from 'ink'
 
-import type { DisplayMessage, PendingQuestion } from "../hooks/use-agent.js";
+import { suggestRuleLabel } from '@tegent/core'
+import type { DisplayMessage, DisplayToolCall, TodoItem } from '@tegent/core'
 
-import { Markdown } from "./Markdown.js";
+// @ 文件补全本期先不接入；保留这行注释，后续恢复时可直接打开相关工具函数。
+// import { applyCompletion, detectAtToken, scoreAndRank } from '../file-completion.js'
+import type { FileEntry } from '../file-completion.js'
+import type { ActiveToolCall } from '../hooks/use-agent.js'
+// @ 文件补全本期先不扫描工作区；恢复 @ 补全时再打开 useFileCompletion。
+// import { useFileCompletion } from '../hooks/use-file-completion.js'
+// 本期使用 Ink useInput；后续如果要恢复 bracketed paste 和跨终端输入兼容，再接回 usePromptInput。
+// import { usePromptInput } from '../hooks/use-prompt-input.js'
+import { HISTORY_MAX, appendInputHistory, loadInputHistory } from '../input-history.js'
+import type { InputHistoryEntry } from '../input-history.js'
+// 大段粘贴折叠成引用本期先不做；恢复该功能时再打开这些 helper。
+// import { expandPasteRefs, formatPasteRef, stripTrailingRef } from '../paste-refs.js'
+import type { PastedContents } from '../paste-refs.js'
+import {
+  GLYPH_BULLET,
+  GLYPH_PLAN_MODE,
+  GLYPH_SELECT_POINTER,
+  GLYPH_TODO_CHECK,
+  GLYPH_TODO_IN_PROGRESS,
+  GLYPH_TODO_PENDING,
+} from '../terminal-glyphs.js'
+import { formatTokenCount, getToolInputPreview, getToolLabel } from '../utils.js'
+import { inputReducer } from './chat-input/reducer.js'
+import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 
-/** 最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
-const MAX_VISIBLE_MESSAGES = 30;
+// export type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 
-/** 计划审批弹层里最多展示的计划行数，超出部分折叠提示。 */
-const MAX_PLAN_LINES = 20;
-
-/** 权限弹层里工具输入摘要的最大长度。 */
-const MAX_PERMISSION_SUMMARY = 400;
+// 大段粘贴折叠成引用的行数阈值，本期关闭该功能，所以常量保留在注释中。
+// const PASTE_REF_MIN_LINES = 3
+// 大段粘贴折叠成引用的字符数阈值，本期关闭该功能，所以常量保留在注释中。
+// const PASTE_REF_MIN_CHARS = 400
+/** Ink 动态区最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
+const MAX_VISIBLE_MESSAGES = 30
+/** slash command 菜单最多展示的候选数量，超过后只显示前 N 项。 */
+const MAX_VISIBLE_MENU_ITEMS = 8
+// @ 文件补全最多展示的候选数量，本期关闭该功能，所以常量保留在注释中。
+// const MAX_AT_RESULTS = 50
+/** PageUp/PageDown 每次让光标跨越的逻辑行数。 */
+const MAX_VERTICAL_CURSOR_JUMP = 10
+/** 双击 Esc 清空输入框的最大间隔，单位毫秒。 */
+const DOUBLE_ESC_WINDOW_MS = 500
 
 interface ChatInputProps {
-  /** 滚动区消息。 */
-  messages: readonly DisplayMessage[];
-  /** 提交入口；App 在这里调用 useAgent.submit。 */
-  onSubmit: (text: string) => void;
-  /** Ctrl+C 入口；App 负责双击退出判定。 */
-  onInterrupt: () => void;
+  /** CLI scrollback 消息。Ink 版直接渲染最近一段消息，不走原版 stdout 提交路径。 */
+  messages: readonly DisplayMessage[]
+  /** 兼容原 ChatInput 的 prop；Ink 版不需要根据 header 行数做光标锚定。 */
+  initialContentRows?: number
+  /** 普通提交入口；App 会在这里分流 slash command 或调用 useAgent.submit。 */
+  onSubmit: (text: string) => void
+  /** Ctrl+C 入口；App 负责双击退出和当前轮取消。 */
+  onInterrupt: () => void
   /** loading 时 Esc 的取消入口。 */
-  onEscapeCancel?: () => void;
+  onEscapeCancel?: () => void
   /** 当前是否有 agent turn 在执行。 */
-  isLoading?: boolean;
-  /** 输入框下方的短提示。 */
-  notice?: string | null;
+  isLoading?: boolean
+  /** 输入框 footer 的短提示。 */
+  notice?: string | null
+  /** 禁用普通键盘输入；Ctrl+C 仍由 Ink useInput 兜住。 */
+  disabled?: boolean
+  /** 完全隐藏输入区域。 */
+  hidden?: boolean
+  /** spinner 状态；由 App 根据 useAgent.state 派生。 */
+  spinner?: SpinnerState | null
+  /** 正在运行的工具调用。 */
+  activeToolCalls?: readonly ActiveToolCall[]
+  /** 模型维护的 todo 列表。 */
+  todos?: readonly TodoItem[]
   /** 错误提示。 */
-  errorMessage?: string | null;
-  /** 挂起中的交互问题（权限确认 / 计划审批 / askUser）。 */
-  question?: PendingQuestion | null;
-  /** 用户回答挂起问题的入口。 */
-  onAnswer?: (value: string) => void;
+  errorMessage?: string | null
+  /** 权限弹窗请求。 */
+  permission?: PermissionRequest | null
+  /** SelectOptions 弹窗请求。 */
+  selectRequest?: SelectRequest | null
+  /** slash command 补全候选。 */
+  commands?: readonly SlashCommand[]
+  /** 当前权限模式，用于 footer 状态提示。 */
+  permissionMode?: 'default' | 'acceptEdits' | 'plan'
+  /** 当前上下文窗口用量。 */
+  contextUsage?: { used: number; window: number } | null
 }
 
-/** 弹层里的一个候选。value 是回传给 useAgent 的答案编码。 */
-interface QuestionChoice {
-  value: string;
-  label: string;
-  description?: string;
+interface CommandMatch {
+  /** slash command 名称或 subcommand 名称。 */
+  name: string
+  /** 展示在补全菜单右侧的说明文字。 */
+  description: string
+  /** 用户接受补全后写回输入框或直接提交的完整文本。 */
+  applyText: string
+  /** 命令参数提示，例如 `[model-id]`；只有命令本身支持参数时存在。 */
+  argumentHint?: string
 }
 
-/** 按问题类型展开候选列表；askUser 无候选时返回空（走自由输入）。 */
-function questionChoices(q: PendingQuestion): QuestionChoice[] {
-  if (q.kind === "permission") {
-    return [
-      { value: "yes", label: "Yes — allow once" },
-      { value: "always", label: "Always — allow for this session" },
-      { value: "no", label: "No — deny" },
-    ];
+interface FreeformState {
+  /** SelectOptions 中 Other 自由输入框的文本。 */
+  text: string
+  /** SelectOptions 中 Other 自由输入框的光标位置。 */
+  cursor: number
+}
+
+/**
+ * 把字符串截断到大致可读的长度。
+ *
+ * Ink 版不做 cell 级宽度计算，这里只用字符数保护菜单和工具预览不要无限变宽。
+ *
+ * @param s 原始文本。
+ * @param max 最大字符数。
+ * @returns 可能带省略号的文本。
+ */
+function truncate(s: string, max: number): string {
+  // 没超过上限时直接返回原字符串，避免无意义分配。
+  if (s.length <= max) return s
+  // 超过上限时预留 1 个字符放省略号，让最终长度大致不超过 max。
+  return s.slice(0, Math.max(0, max - 1)) + '…'
+}
+
+/**
+ * 生成工具调用的单行入参预览。
+ *
+ * @param toolName 工具名。
+ * @param input 工具入参。
+ * @param max 最大字符数。
+ * @returns 可直接显示在工具标题后的预览文本。
+ */
+function toolPreview(toolName: string, input: Record<string, unknown>, max = 90): string {
+  // getToolInputPreview 会按工具类型挑选最有用的字段，例如 shell command 或 file path。
+  const preview = getToolInputPreview(toolName, input)
+  // 有预览就截断到 UI 可接受长度；没有可读字段时返回空字符串。
+  return preview ? truncate(preview, max) : ''
+}
+
+/**
+ * 根据工具结果状态选择 Ink 颜色。
+ *
+ * @param status 工具状态。
+ * @returns Ink Text 可接受的颜色名。
+ */
+function toolStatusColor(status: DisplayToolCall['status']): 'green' | 'yellow' | 'red' | 'gray' {
+  // 成功完成用绿色，表示这条工具结果已经落定。
+  if (status === 'completed') return 'green'
+  // 工具报错或被用户拒绝都属于需要注意的失败状态，用红色。
+  if (status === 'error' || status === 'denied') return 'red'
+  // running 只会出现在运行区或未完成工具展示中，用黄色表示进行中。
+  if (status === 'running') return 'yellow'
+  // 其它 pending/未知状态用灰色，降低视觉权重。
+  return 'gray'
+}
+
+/**
+ * 判断 slash command 是否 fuzzy 命中。
+ *
+ * 逻辑和原 ChatInput 一致：query 是 target 的子序列即可，比如 `mc` 能命中 `mcp`。
+ *
+ * @param target 候选命令名。
+ * @param query 用户输入的查询。
+ * @returns 是否命中。
+ */
+function fuzzyMatches(target: string, query: string): boolean {
+  // qi 指向 query 当前等待匹配的字符。
+  let qi = 0
+  // ti 从左到右扫描 target；只要顺序能对上，就认为 fuzzy 命中。
+  for (let ti = 0; ti < target.length && qi < query.length; ti++) {
+    // 当前 target 字符命中 query 当前字符时，推进 query 指针。
+    if (target[ti] === query[qi]) qi++
   }
-  if (q.kind === "plan") {
-    return [
-      { value: "approve", label: "Approve — exit plan mode and start implementing" },
-      { value: "reject", label: "Reject — stay in plan mode and keep planning" },
-    ];
-  }
-  if (q.options && q.options.length > 0) {
-    return q.options.map((o) => ({ value: o.label, label: o.label, description: o.description }));
-  }
-  return [];
+  // query 每个字符都被按顺序匹配到，才算命中。
+  return qi === query.length
 }
 
-/** 权限弹层的工具输入摘要：shell 显示命令，writeFile/edit 显示路径，其余 JSON。 */
-function summarizePermissionInput(toolName: string, input: Record<string, unknown>): string {
-  if (toolName === "shell") return String(input.command ?? "");
-  if (toolName === "writeFile" || toolName === "edit") return String(input.filePath ?? "");
-  const json = JSON.stringify(input);
-  return json.length > MAX_PERMISSION_SUMMARY ? `${json.slice(0, MAX_PERMISSION_SUMMARY)}...` : json;
+/**
+ * 根据消息类型生成左侧短标签。
+ *
+ * @param msg 要渲染的 display message。
+ * @returns 适合在 TUI 中显示的标签。
+ */
+function renderMessageLabel(msg: DisplayMessage): string {
+  // slash command 回显用短 `$` 标签，和普通用户消息区分开。
+  if (msg.kind === 'command-echo') return '$'
+  // slash command 结果和系统提示类消息用 info。
+  if (msg.kind === 'command-result') return 'info'
+  // 用户输入显示为 you。
+  if (msg.role === 'user') return 'you'
+  // tool 角色理论上很少直接进入此 Ink 展示路径，保留标签兜底。
+  if (msg.role === 'tool') return 'tool'
+  // 其它默认按 assistant 输出处理。
+  return 'assistant'
 }
 
-/** 根据消息角色生成左侧短标签。 */
-function renderLabel(msg: DisplayMessage): string {
-  if (msg.role === "user") return "you";
-  if (msg.role === "tool") return "tool";
-  if (msg.role === "system") return "system";
-  return "assistant";
-}
-
-/** 渲染一条消息：标签一行 + 正文逐行。 */
+/**
+ * 渲染一条 scrollback 消息。
+ *
+ * @param props.msg useAgent 已经转换好的 DisplayMessage。
+ * @returns Ink 消息块。
+ */
 function MessageBlock({ msg }: { msg: DisplayMessage }) {
-  const label = renderLabel(msg);
-  const labelColor =
-    msg.role === "user"
-      ? "cyan"
-      : msg.role === "tool"
-        ? "gray"
-        : msg.role === "system"
-          ? "yellow"
-          : undefined;
-
-  // assistant 输出是 Markdown，交给 Markdown 组件渲染；空内容（流式刚开始的占位）不渲染。
-  if (msg.role === "assistant") {
-    if (msg.content.trim().length === 0) return null;
-    return (
-      <Box flexDirection="column" marginBottom={1}>
-        <Text>{label}</Text>
-        <Markdown source={msg.content} />
-      </Box>
-    );
-  }
-
-  const lines = msg.content.length > 0 ? msg.content.trimEnd().split("\n") : [];
-
-  if (lines.length === 0) return null;
+  // label 决定每条消息左侧显示 you/assistant/info/$。
+  const label = renderMessageLabel(msg)
+  // 用户和命令回显更醒目，用 cyan；其它消息降低视觉权重。
+  const labelColor = msg.role === 'user' || msg.kind === 'command-echo' ? 'cyan' : 'gray'
+  // 普通文本按行渲染；trimEnd 避免末尾空行额外撑高消息块。
+  const lines = msg.content.length > 0 ? msg.content.trimEnd().split('\n') : []
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {labelColor ? (
-        <Text color={labelColor}>{label}</Text>
-      ) : (
-        <Text>{label}</Text>
-      )}
-      {lines.map((line, idx) => (
-        <Text key={`${msg.id}-line-${idx}`}>{line}</Text>
+      {/* 有文本内容时先渲染消息标签和每一行正文。 */}
+      {lines.length > 0 ? (
+        <Box flexDirection="column">
+          <Text color={labelColor}>{label}</Text>
+          {lines.map((line, idx) => (
+            <Text key={`${msg.id}-line-${idx}`}>{line}</Text>
+          ))}
+        </Box>
+      ) : null}
+      {/* 工具结果挂在 assistant 消息上，逐条交给 ToolResult 渲染。 */}
+      {msg.toolCalls?.map((tc) => (
+        <ToolResult key={tc.id} toolCall={tc} />
       ))}
     </Box>
-  );
+  )
 }
 
-/** 挂起问题的弹层：标题 + 详情（工具输入/计划正文）+ 候选列表或自由输入提示。 */
-function QuestionBlock({
-  question,
-  choices,
-  selectedIndex,
-}: {
-  question: PendingQuestion;
-  choices: QuestionChoice[];
-  selectedIndex: number;
-}) {
-  const freeText = choices.length === 0;
-  const title =
-    question.kind === "permission"
-      ? `Allow ${question.toolName}?`
-      : question.kind === "plan"
-        ? "Plan approval requested"
-        : question.question;
-
-  const detailLines: string[] = [];
-  if (question.kind === "permission") {
-    detailLines.push(summarizePermissionInput(question.toolName, question.input));
-  } else if (question.kind === "plan") {
-    const lines = question.planText.split("\n");
-    detailLines.push(...lines.slice(0, MAX_PLAN_LINES));
-    if (lines.length > MAX_PLAN_LINES) {
-      detailLines.push(`... (${lines.length - MAX_PLAN_LINES} more lines not shown)`);
-    }
-  }
+/**
+ * 渲染已经完成并进入 scrollback 的工具结果。
+ *
+ * @param props.toolCall 工具结果展示对象。
+ * @returns Ink 工具结果块。
+ */
+function ToolResult({ toolCall }: { toolCall: DisplayToolCall }) {
+  // 将内部工具名转换成更适合 UI 展示的标签，例如 shell -> Bash/Zsh。
+  const label = getToolLabel(toolCall.toolName)
+  // 从工具 input 中提取短预览，例如文件路径或命令文本。
+  const preview = toolPreview(toolCall.toolName, toolCall.input)
+  // 根据工具状态决定整条工具标题的颜色。
+  const color = toolStatusColor(toolCall.status)
+  // 工具输出压成单行摘要；避免长输出把 scrollback 直接撑满。
+  const output = toolCall.output ? truncate(toolCall.output.replace(/\s+/g, ' ').trim(), 180) : ''
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginBottom={1}>
-      <Text bold color="magenta">
-        {title}
+    <Box flexDirection="column">
+      <Text color={color}>
+        {' '}
+        {GLYPH_BULLET} {label}
+        {preview ? `(${preview})` : ''}
       </Text>
-      {detailLines.map((line, idx) => (
-        <Text key={`detail-${idx}`} color="gray">
-          {line.length > 0 ? line : " "}
-        </Text>
-      ))}
-      {choices.map((choice, idx) => (
-        <Box key={choice.value} flexDirection="column">
-          {idx === selectedIndex ? (
-            <Text color="green">{`❯ ${idx + 1}. ${choice.label}`}</Text>
-          ) : (
-            <Text>{`  ${idx + 1}. ${choice.label}`}</Text>
-          )}
-          {choice.description ? (
-            <Text color="gray">{`    ${choice.description}`}</Text>
-          ) : null}
-        </Box>
-      ))}
-      <Text color="gray">
-        {freeText
-          ? "Type your answer below, Enter to send · Esc to skip"
-          : "↑/↓ or 1-9 to select · Enter to confirm · Esc to deny"}
-      </Text>
+      {output ? <Text color={toolCall.status === 'error' ? 'red' : 'gray'}> ⎿ {output}</Text> : null}
     </Box>
-  );
+  )
 }
 
+/**
+ * 渲染当前仍在运行的工具调用。
+ *
+ * @param props.tools useAgent.state.activeToolCalls。
+ * @returns Ink 工具运行区。
+ */
+function ActiveTools({ tools }: { tools: readonly ActiveToolCall[] }) {
+  // 没有运行中工具时不渲染这一块，避免产生空白区域。
+  if (tools.length === 0) return null
+
+  return (
+    <Box flexDirection="column">
+      {tools.map((tool) => {
+        // 运行中工具也用和已完成工具一致的标签格式。
+        const label = getToolLabel(tool.toolName)
+        // 运行中工具预览展示命令、路径或任务描述，帮助用户知道正在做什么。
+        const preview = toolPreview(tool.toolName, tool.input)
+        return (
+          <Box key={tool.id} flexDirection="column">
+            <Text color="yellow">
+              {' '}
+              {GLYPH_BULLET} {label}
+              {preview ? `(${preview})` : ''}
+            </Text>
+            <Text color="gray"> ⎿ {tool.progress ?? 'Running...'}</Text>
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+/**
+ * 渲染模型通过 TodoWrite 维护的 todo 面板。
+ *
+ * @param props.todos 当前 todo 列表。
+ * @returns Ink todo 面板。
+ */
+function Todos({ todos }: { todos: readonly TodoItem[] }) {
+  // 没有 todo 时不渲染 todo 面板。
+  if (todos.length === 0) return null
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
+      {todos.map((todo, idx) => {
+        // 根据 todo 状态选择对应图标：完成、进行中、待开始。
+        const glyph =
+          todo.status === 'completed'
+            ? GLYPH_TODO_CHECK
+            : todo.status === 'in_progress'
+              ? GLYPH_TODO_IN_PROGRESS
+              : GLYPH_TODO_PENDING
+        // 完成用绿色，进行中用黄色，待开始用灰色。
+        const color = todo.status === 'completed' ? 'green' : todo.status === 'in_progress' ? 'yellow' : 'gray'
+        return (
+          <Text key={`${todo.content}-${idx}`} color={color}>
+            {/* 进行中的 todo 优先展示 activeForm，让文案更像“正在做什么”。 */}
+            {glyph} {todo.status === 'in_progress' ? todo.activeForm || todo.content : todo.content}
+          </Text>
+        )
+      })}
+    </Box>
+  )
+}
+
+/**
+ * 渲染权限确认弹窗。
+ *
+ * @param props.permission 当前权限请求。
+ * @param props.selected 当前选中的选项下标。
+ * @returns Ink 权限弹窗。
+ */
+function PermissionDialog({ permission, selected }: { permission: PermissionRequest; selected: number }) {
+  // MCP 工具展示 server/rawName；内置工具展示格式化后的工具名。
+  const title = permission.mcp
+    ? `X-Code wants to use MCP tool: ${permission.mcp.serverName}/${permission.mcp.rawName}`
+    : `X-Code wants to use ${getToolLabel(permission.toolName)}`
+  // 权限弹窗中展示一段短参数预览，帮助用户判断是否授权。
+  const preview = toolPreview(permission.toolName, permission.input, 120)
+  // suggestRuleLabel 不为 null 表示可以生成 always-allow 规则。
+  const hasAlways = suggestRuleLabel(permission.toolName, permission.input, !!permission.mcp) !== null
+  // 支持永久授权时显示 Yes/Always/No，否则只显示 Yes/No。
+  const choices = hasAlways ? ['Yes', 'Always', 'No'] : ['Yes', 'No']
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
+      <Text color="yellow">{title}</Text>
+      {preview ? <Text color="gray">{preview}</Text> : null}
+      <Box flexDirection="column" marginTop={1}>
+        {choices.map((choice, idx) => (
+          <Text key={choice} color={idx === selected ? 'cyan' : undefined}>
+            {idx === selected ? GLYPH_SELECT_POINTER : ' '} {choice}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
+/**
+ * 渲染 askUser/slash command 复用的选择器弹窗。
+ *
+ * @param props.request 当前选择器请求。
+ * @param props.selected 当前选中的选项下标。
+ * @param props.freeform 自由输入缓冲区。
+ * @returns Ink 选择器。
+ */
+function SelectDialog({
+  request,
+  selected,
+  freeform,
+}: {
+  request: SelectRequest
+  selected: number
+  freeform: FreeformState
+}) {
+  // 当前高亮选项；如果它是 freeform，就在下面显示 Other 输入行。
+  const option = request.options[selected]
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
+      <Text color="cyan">{request.question}</Text>
+      <Box flexDirection="column" marginTop={1}>
+        {request.options.map((opt, idx) => (
+          <Box key={`${opt.label}-${idx}`} flexDirection="column">
+            <Text color={idx === selected ? 'cyan' : undefined}>
+              {/* 当前选中项用指针标记，其余项用空格保持对齐。 */}
+              {idx === selected ? GLYPH_SELECT_POINTER : ' '} {opt.label}
+              {/* compact 布局把描述放在同一行，节省垂直空间。 */}
+              {request.layout === 'compact' && opt.description ? <Text color="gray"> {opt.description}</Text> : null}
+            </Text>
+            {/* 非 compact 布局把描述放到下一行，便于展示较长说明。 */}
+            {request.layout !== 'compact' && opt.description ? <Text color="gray"> {opt.description}</Text> : null}
+          </Box>
+        ))}
+      </Box>
+      {/* Other/freeform 选项会渲染一个内联输入框，并用 inverse Text 显示光标。 */}
+      {option?.freeform ? (
+        <Text>
+          Other: {freeform.text.slice(0, freeform.cursor)}
+          <Text inverse>{freeform.text[freeform.cursor] ?? ' '}</Text>
+          {freeform.text.slice(freeform.cursor + 1)}
+        </Text>
+      ) : null}
+      {/* 有 preview 时展示前 8 行，避免预览太长挤掉输入区域。 */}
+      {option?.preview?.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {option.preview.slice(0, 8).map((line, idx) => (
+            <Text key={`preview-${idx}`}>{line}</Text>
+          ))}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+/**
+ * 渲染 slash command 或 @ 文件补全菜单。
+ *
+ * @param props.kind 菜单类型。
+ * @param props.commandMatches slash 命令候选。
+ * @param props.atMatches @ 文件候选。
+ * @param props.selected 当前选中下标。
+ * @returns Ink 菜单。
+ */
+function CompletionMenu({
+  kind,
+  commandMatches,
+  atMatches,
+  selected,
+}: {
+  kind: 'slash' | 'at'
+  commandMatches: readonly CommandMatch[]
+  atMatches: readonly FileEntry[]
+  selected: number
+}) {
+  // 先把 slash/@ 两种候选统一成菜单行结构，下面渲染逻辑就不需要关心来源。
+  const rows =
+    kind === 'slash'
+      ? commandMatches.map((cmd) => ({
+          // key 用最终写回文本，保证同名不同层级候选也能区分。
+          key: cmd.applyText,
+          // title 是菜单左侧主文本。
+          title: cmd.name,
+          // suffix 放参数提示；没有参数提示时为空。
+          suffix: cmd.argumentHint ?? '',
+          // description 是菜单右侧说明。
+          description: cmd.description,
+        }))
+      : atMatches.map((entry) => ({
+          // @ 补全本期关闭；这里保留原菜单行格式，后续恢复时可直接使用。
+          key: entry.relPath,
+          title: entry.relPath + (entry.isDirectory ? '/' : ''),
+          suffix: '',
+          description: entry.isDirectory ? 'directory' : 'file',
+        }))
+
+  // 没有候选时不渲染菜单。
+  if (rows.length === 0) return null
+
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+      {/* 菜单只渲染前 MAX_VISIBLE_MENU_ITEMS 项，避免候选过多占满屏幕。 */}
+      {rows.slice(0, MAX_VISIBLE_MENU_ITEMS).map((row, idx) => (
+        <Text key={row.key} color={idx === selected ? 'cyan' : undefined}>
+          {/* 当前选中项用指针提示；其它项前面放空格保持列对齐。 */}
+          {idx === selected ? GLYPH_SELECT_POINTER : ' '} {row.title}
+          {row.suffix ? <Text color="gray"> {row.suffix}</Text> : null}
+          {row.description ? <Text color="gray"> {row.description}</Text> : null}
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
+/**
+ * 渲染输入框底部状态行。
+ *
+ * @param props.permissionMode 当前权限模式。
+ * @param props.contextUsage 上下文窗口用量。
+ * @param props.notice 临时提示。
+ * @returns Ink footer。
+ */
+function Footer({
+  permissionMode,
+  contextUsage,
+  notice,
+}: {
+  permissionMode: ChatInputProps['permissionMode']
+  contextUsage: ChatInputProps['contextUsage']
+  notice?: string | null
+}) {
+  // 根据权限模式生成左侧模式提示；default 模式不展示额外文案。
+  const modeText =
+    permissionMode === 'plan' ? `${GLYPH_PLAN_MODE} plan mode` : permissionMode === 'acceptEdits' ? 'accept edits' : ''
+  // 有上下文窗口信息时展示 used/window 和百分比。
+  const usageText = contextUsage
+    ? `${formatTokenCount(contextUsage.used)} / ${formatTokenCount(contextUsage.window)} · ${Math.round(
+        (contextUsage.used / contextUsage.window) * 100,
+      )}%`
+    : ''
+
+  // 三种 footer 内容都为空时，整行不渲染。
+  if (!modeText && !usageText && !notice) return null
+
+  return (
+    <Box justifyContent="space-between">
+      {/* notice 优先级最高；没有 notice 时展示模式提示。 */}
+      <Text color={notice ? 'yellow' : 'gray'}>{notice ?? modeText}</Text>
+      {usageText ? <Text color="gray">{usageText}</Text> : null}
+    </Box>
+  )
+}
+
+/**
+ * Ink 直渲染版 ChatInput。
+ *
+ * 数据流：
+ * - App 把 useAgent.state 传进来，本组件负责渲染。
+ * - 用户输入先存在本组件本地 reducer/ref 中。
+ * - Enter 后调用 onSubmit，把文本交回 App，再由 App 调 useAgent.submit 或处理 slash command。
+ *
+ * @param props ChatInput 渲染和交互所需的全部状态/回调。
+ * @returns Ink 组件树。
+ */
 export function ChatInput({
   messages,
   onSubmit,
@@ -192,187 +532,760 @@ export function ChatInput({
   onEscapeCancel,
   isLoading = false,
   notice,
+  disabled = false,
+  hidden = false,
+  spinner,
+  activeToolCalls = [],
+  todos = [],
   errorMessage,
-  question,
-  onAnswer,
+  permission,
+  selectRequest,
+  commands = [],
+  permissionMode = 'default',
+  contextUsage,
 }: ChatInputProps) {
-  // 单行输入：文本 + 光标位置，光标渲染为反色字符。
-  const [text, setText] = useState("");
-  const [cursor, setCursor] = useState(0);
-  // 问题弹层的当前选中候选；问题切换（id 变化）时复位。
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  // 非 TTY（管道/重定向）下 stdin 不支持 raw mode，useInput 必须停用，
-  // 否则 Ink 会直接抛错；此时输入框只读，仍能渲染消息流。
-  const { isRawModeSupported } = useStdin();
-
-  const choices = useMemo(() => (question ? questionChoices(question) : []), [question]);
-  // askUser 无候选时是自由输入问题，复用主输入框收集答案。
-  const freeTextQuestion = question !== undefined && question !== null && choices.length === 0;
-
+  // 主输入框内容和光标位置。用 reducer 保证“改文本 + 移光标”是一次原子状态更新。
+  const [{ text, cursor }, dispatch] = useReducer(inputReducer, { text: '', cursor: 0 })
+  // 某些键盘处理需要同步读到最新光标，ref 避免闭包拿旧 cursor。
+  const cursorRef = useRef(0)
   useEffect(() => {
-    setSelectedIndex(0);
-  }, [question?.id]);
+    // 每次 React 状态里的 cursor 更新后，同步到 ref，键盘回调可以立即读到最新值。
+    cursorRef.current = cursor
+  }, [cursor])
 
-  /** 普通文本编辑按键（退格/移动/插入）；平时输入和问题的自由输入共用。 */
-  const applyEditKey = (input: string, key: Key) => {
-    if (key.backspace || key.delete) {
-      setText((t) => t.slice(0, Math.max(0, cursor - 1)) + t.slice(cursor));
-      setCursor((c) => Math.max(0, c - 1));
-      return;
+  // 大段粘贴折叠成引用本期先不做；保留空 pastedContents 只是为了输入历史类型兼容。
+  // pastedContents 的 key 是 paste id，value 是原始粘贴内容；当前第一版始终保持空对象。
+  const [pastedContents, setPastedContents] = useState<PastedContents>({})
+  // const nextPasteIdRef = useRef(1)
+
+  // slash command 维护选中下标；@ 文件补全本期先不做。
+  // completionIndex 记录 slash 补全菜单当前高亮第几项。
+  const [completionIndex, setCompletionIndex] = useState(0)
+  // @ 补全关闭后不读取 state 值，只保留 setter，方便重置逻辑和未来恢复代码保持形状。
+  const [, setAtCompletionIndex] = useState(0)
+  // const [atDismissed, setAtDismissed] = useState<string | null>(null)
+  // const { entries: fileEntries } = useFileCompletion()
+
+  // 弹窗本地状态：权限选项、选择器选项、Other 自由输入。
+  // permissionSelected 表示权限弹窗当前高亮 Yes/Always/No 的哪一项。
+  const [permissionSelected, setPermissionSelected] = useState(0)
+  // selectIndex 表示 SelectOptions 弹窗当前高亮哪一项。
+  const [selectIndex, setSelectIndex] = useState(0)
+  // freeform 保存 SelectOptions 中 Other 输入框的文本和光标。
+  const [freeform, setFreeform] = useState<FreeformState>({ text: '', cursor: 0 })
+
+  // spinner 自己计时，避免要求父组件为了动画频繁重渲染。
+  // spinnerFrame 是 0-3 的动画帧下标，用来从 '⠋⠙⠹⠸' 中取当前字符。
+  const [spinnerFrame, setSpinnerFrame] = useState(0)
+  // lastEscapeAtRef 记录上一次按 Esc 的时间，用来判断是否双击 Esc 清空输入。
+  const lastEscapeAtRef = useRef(0)
+
+  // 输入历史用 ref 保存，因为 Up/Down 快速连按时需要同步更新索引，不适合等 React state 落地。
+  // historyRef 保存从磁盘加载的输入历史，以及当前会话新增的历史。
+  const historyRef = useRef<InputHistoryEntry[]>([])
+  // historyIndexRef 表示当前正在查看倒数第几条历史；0 表示没有进入历史导航。
+  const historyIndexRef = useRef(0)
+  // historyDraftRef 保存用户开始翻历史前的草稿，Down 回到最新位置时恢复它。
+  const historyDraftRef = useRef<{ text: string; cursor: number; pasted: PastedContents } | null>(null)
+  // initialCwdRef 固定启动时 cwd，历史文件始终写入同一个项目目录。
+  const initialCwdRef = useRef(process.cwd())
+
+  // useStdout 提供终端尺寸；rows 用来估算可以显示多少条最近消息。
+  const { stdout } = useStdout()
+  const rows = stdout?.rows ?? 30
+
+  /**
+   * 当前可见的最近消息。
+   *
+   * 原版把历史写进真实 scrollback；Ink 版直接渲染一段尾部历史，避免巨量消息撑爆动态区域。
+   */
+  const visibleMessages = useMemo(() => {
+    // 预留输入框、菜单、弹窗、spinner 等动态区域的高度。
+    const reservedRows = 14
+    // 根据终端行数动态收缩历史消息数量，但至少保留 5 条。
+    const maxMessages = Math.min(MAX_VISIBLE_MESSAGES, Math.max(5, rows - reservedRows))
+    // 只展示尾部消息，避免 Ink 动态区域过高。
+    return messages.slice(-maxMessages)
+  }, [messages, rows])
+
+  /**
+   * slash command 补全候选。
+   *
+   * 第一阶段补命令名，第二阶段补 subcommand；`applyText` 保存接受补全后应该写回输入框的完整文本。
+   */
+  const matches: CommandMatch[] = (() => {
+    // 只有输入以 / 开头时才进入 slash command 补全。
+    if (!text.startsWith('/')) return []
+    // 第一个空格用来区分“补命令名”和“补子命令”两个阶段。
+    const firstSpace = text.indexOf(' ')
+    if (firstSpace === -1) {
+      // 命令名阶段：去掉开头 /，拿剩余文本做 fuzzy query。
+      const query = text.slice(1).toLowerCase()
+      // query 为空时展示所有命令；非空时按 fuzzyMatches 过滤。
+      const filtered = !query
+        ? commands
+        : commands.filter((cmd) => fuzzyMatches(cmd.name.slice(1).toLowerCase(), query))
+      // 只取前几项，并转换成菜单渲染需要的 CommandMatch。
+      return filtered.slice(0, MAX_VISIBLE_MENU_ITEMS).map((cmd) => ({
+        name: cmd.name,
+        description: cmd.description,
+        applyText: cmd.name,
+        argumentHint: cmd.argumentHint,
+      }))
     }
 
-    if (key.leftArrow) {
-      setCursor((c) => Math.max(0, c - 1));
-      return;
+    // 子命令阶段：head 是主命令，tail 是主命令后面的输入。
+    const head = text.slice(0, firstSpace)
+    const tail = text.slice(firstSpace + 1)
+    // tail 已经包含空格时，说明用户开始输入参数，本期不再继续补全。
+    if (tail.includes(' ')) return []
+
+    // 找到当前主命令定义；没有 subcommands 时不展示二级补全。
+    const cmd = commands.find((c) => c.name === head)
+    if (!cmd?.subcommands) return []
+
+    // 子命令阶段同样用 fuzzy query 过滤候选。
+    const query = tail.toLowerCase()
+    const filtered = !query
+      ? cmd.subcommands
+      : cmd.subcommands.filter((sub) => fuzzyMatches(sub.name.toLowerCase(), query))
+    // 子命令接受补全后写回成 `/main sub` 形式。
+    return filtered.slice(0, MAX_VISIBLE_MENU_ITEMS).map((sub) => ({
+      name: sub.name,
+      description: sub.description,
+      applyText: `${head} ${sub.name}`,
+    }))
+  })()
+
+  // /**
+  //   @ 文件补全触发器和候选。
+  //  *
+  //  * `detectAtToken` 保持和 core 的文件引用解析规则一致，避免 UI 提示一个后端不认的路径。
+  //  */
+  // const atTrigger = useMemo(() => detectAtToken(text, cursor), [text, cursor])
+  // const atMatches = useMemo(() => {
+  //   if (!atTrigger.active) return [] as FileEntry[]
+  //   return scoreAndRank(fileEntries as FileEntry[], atTrigger.query).slice(0, MAX_AT_RESULTS)
+  // }, [atTrigger, fileEntries])
+  // const safeAtIndex = atMatches.length > 0 ? atCompletionIndex % atMatches.length : 0
+
+  const atMatches: FileEntry[] = [] // @ 文件补全本期关闭；这里保留空数组是为了让 CompletionMenu 的 props 形状不变。
+  // @ 文件补全开启时，这里会保存取模后的安全选中下标，避免候选数量变化后下标越界。
+  // const safeAtIndex = 0
+  // slash 补全当前选中项的安全下标；候选数量变化时用取模把 completionIndex 拉回有效范围。
+  const safeCommandIndex = matches.length > 0 ? completionIndex % matches.length : 0
+  // 当前选中的 slash 命令候选；没有候选时为 null，Enter/Tab 就不会接受补全。
+  const currentMatch = matches.length > 0 ? matches[safeCommandIndex] : null
+  // const atDismissedKey = `${atTrigger.atIdx}:${atTrigger.query}`
+  // 当前显示的补全菜单类型；本期只允许 slash 菜单，@ 菜单逻辑保留在注释里。
+  const activeMenu: 'slash' | 'at' | null = matches.length > 0 ? 'slash' : null
+  // const activeMenu: 'slash' | 'at' | null =
+  //   matches.length > 0 ? 'slash' : atTrigger.active && atDismissed !== atDismissedKey ? 'at' : null
+
+  // 启动时读取项目本地输入历史；失败静默吞掉，历史不是核心功能。
+  useEffect(() => {
+    let cancelled = false
+    void loadInputHistory(initialCwdRef.current).then((entries) => {
+      if (!cancelled) historyRef.current = entries
+    })
+    return () => {
+      cancelled = true
     }
+  }, [])
 
-    if (key.rightArrow) {
-      setCursor((c) => Math.min(text.length, c + 1));
-      return;
+  // spinner 动画帧；只有 spinner 存在时启动定时器。
+  useEffect(() => {
+    if (!spinner) return
+    const timer = setInterval(() => {
+      setSpinnerFrame((frame) => (frame + 1) % 4)
+    }, 200)
+    return () => clearInterval(timer)
+  }, [spinner])
+
+  // 新权限请求出现时，默认选中第一个选项。
+  useEffect(() => {
+    queueMicrotask(() => setPermissionSelected(0))
+  }, [permission])
+
+  // 新选择器出现时，重置选项和自由输入。
+  useEffect(() => {
+    queueMicrotask(() => {
+      setSelectIndex(0)
+      setFreeform({ text: '', cursor: 0 })
+    })
+  }, [selectRequest])
+
+  /**
+   * 清空输入历史导航状态。
+   */
+  const resetHistoryNav = () => {
+    // 回到 0 表示退出历史浏览状态。
+    historyIndexRef.current = 0
+    // 草稿只在历史浏览期间需要，退出后清空。
+    historyDraftRef.current = null
+  }
+
+  /**
+   * 把一次成功提交写入内存历史和磁盘历史。
+   *
+   * @param raw 输入框里的原始文本，保留粘贴引用占位符。
+   * @param pasted 当前粘贴引用内容表。
+   */
+  const pushHistory = (raw: string, pasted: PastedContents) => {
+    // 空白输入不写历史。
+    if (!raw.trim()) return
+    // 连续提交同一条输入时不重复写历史。
+    const last = historyRef.current[historyRef.current.length - 1]
+    if (last && last.text === raw) return
+    // 历史条目保存原始文本、粘贴引用内容和时间戳。
+    const entry: InputHistoryEntry = { text: raw, pasted: { ...pasted }, ts: Date.now() }
+    // 先写入内存历史，Up/Down 立即可用。
+    historyRef.current.push(entry)
+    // 内存中只保留最近 HISTORY_MAX 条；磁盘文件不在这里裁剪。
+    if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift()
+    // 磁盘历史是 best-effort，失败不会打断用户提交。
+    void appendInputHistory(entry, initialCwdRef.current)
+  }
+
+  /**
+   * 把历史条目恢复到输入框。
+   *
+   * @param entry 历史条目。
+   * @param cursorAt 恢复后光标放在开头还是结尾。
+   */
+  const restoreHistoryEntry = (entry: { text: string; pasted: PastedContents }, cursorAt: 'start' | 'end') => {
+    // 恢复历史文本，并按调用方要求把光标放在开头或结尾。
+    dispatch({ type: 'SET_TEXT', text: entry.text, cursor: cursorAt === 'start' ? 0 : entry.text.length })
+    // 大段粘贴引用本期关闭；这里仍恢复 pasted map，保持历史数据结构兼容。
+    setPastedContents({ ...entry.pasted })
+    // 恢复历史后重置补全菜单选中项。
+    setCompletionIndex(0)
+    setAtCompletionIndex(0)
+  }
+
+  /**
+   * 向更旧的历史记录导航。
+   */
+  const navigateHistoryUp = () => {
+    // 没有历史时 Up 不做任何事。
+    if (historyRef.current.length === 0) return
+    // 已经走到最旧历史时继续 Up 不再变化。
+    if (historyIndexRef.current >= historyRef.current.length) return
+    if (historyIndexRef.current === 0) {
+      // 第一次进入历史浏览时，保存当前草稿，方便 Down 回来。
+      historyDraftRef.current = { text, cursor: cursorRef.current, pasted: { ...pastedContents } }
     }
+    // index 表示“从最后一条开始往前数第几条”。
+    historyIndexRef.current += 1
+    // 根据 index 从数组尾部取历史项。
+    const entry = historyRef.current[historyRef.current.length - historyIndexRef.current]
+    // Up 取到历史后，把光标放在开头，符合原输入体验。
+    if (entry) restoreHistoryEntry(entry, 'start')
+  }
 
-    // 普通文本插入光标处；过滤掉控制字符。
-    if (
-      input &&
-      !key.ctrl &&
-      !key.meta &&
-      !key.escape &&
-      !key.tab &&
-      !key.return
-    ) {
-      setText((t) => t.slice(0, cursor) + input + t.slice(cursor));
-      setCursor((c) => c + input.length);
-    }
-  };
-
-  /** 挂起问题时的按键处理：候选选择或自由输入。 */
-  const handleQuestionKey = (input: string, key: Key) => {
-    if (!question || !onAnswer) return;
-
-    // Esc：按保守答案直接关闭问题（拒绝/驳回/跳过）。
-    if (key.escape) {
-      onAnswer(question.kind === "permission" ? "no" : question.kind === "plan" ? "reject" : "");
-      if (freeTextQuestion) {
-        setText("");
-        setCursor(0);
-      }
-      return;
-    }
-
-    if (key.return) {
-      if (freeTextQuestion) {
-        onAnswer(text);
-        setText("");
-        setCursor(0);
+  /**
+   * 向更新的历史记录导航；回到 0 时恢复用户开始翻历史前的草稿。
+   */
+  const navigateHistoryDown = () => {
+    // 没进入历史浏览时 Down 不处理历史。
+    if (historyIndexRef.current <= 0) return
+    // 往较新的历史移动一格。
+    historyIndexRef.current -= 1
+    if (historyIndexRef.current === 0) {
+      // 回到 0 表示离开历史浏览，要恢复用户原来的草稿。
+      const draft = historyDraftRef.current
+      historyDraftRef.current = null
+      if (draft) {
+        // 有草稿时恢复草稿文本和光标。
+        dispatch({ type: 'SET_TEXT', text: draft.text, cursor: draft.cursor })
+        setPastedContents({ ...draft.pasted })
       } else {
-        const choice = choices[selectedIndex];
-        if (choice) onAnswer(choice.value);
+        // 没有草稿时清空输入框。
+        dispatch({ type: 'RESET' })
+        setPastedContents({})
       }
-      return;
+      setCompletionIndex(0)
+      setAtCompletionIndex(0)
+      return
     }
+    // 仍在历史浏览中时，显示下一条更新的历史，并把光标放在结尾。
+    const entry = historyRef.current[historyRef.current.length - historyIndexRef.current]
+    if (entry) restoreHistoryEntry(entry, 'end')
+  }
 
-    if (freeTextQuestion) {
-      applyEditKey(input, key);
-      return;
+  /**
+   * 按逻辑行上下移动光标。
+   *
+   * @param delta 移动的行数，负数向上，正数向下。
+   * @returns 如果光标真的移动了返回 true；已经到边界则返回 false。
+   */
+  const moveCursorVertically = (delta: number): boolean => {
+    // 用换行符拆出逻辑行，Ink 版这里不做终端 cell 宽度换行计算。
+    const lines = text.split('\n')
+    // line/col 保存当前光标所在逻辑行和列。
+    let line = 0
+    let col = cursorRef.current
+    // charsSoFar 记录扫描到当前行之前累计了多少字符。
+    let charsSoFar = 0
+    for (let i = 0; i < lines.length; i++) {
+      // 找到包含当前 cursor 的逻辑行。
+      if (charsSoFar + lines[i].length >= cursorRef.current && cursorRef.current >= charsSoFar) {
+        line = i
+        col = cursorRef.current - charsSoFar
+        break
+      }
+      // 每行长度加 1 是为了计算换行符本身。
+      charsSoFar += lines[i].length + 1
     }
+    // 目标行会被限制在第一行和最后一行之间。
+    const targetLine = Math.max(0, Math.min(lines.length - 1, line + delta))
+    // 目标行没有变化，说明已经到边界。
+    if (targetLine === line) return false
+    // 如果目标行更短，列号压到目标行末尾。
+    const targetCol = Math.min(col, lines[targetLine].length)
+    // 把目标行列重新换算成字符串下标。
+    let newPos = 0
+    for (let i = 0; i < targetLine; i++) newPos += lines[i].length + 1
+    newPos += targetCol
+    // 通过 reducer 原子更新光标。
+    dispatch({ type: 'SET_CURSOR', cursor: newPos })
+    return true
+  }
 
-    if (key.upArrow || key.leftArrow) {
-      setSelectedIndex((i) => (i - 1 + choices.length) % choices.length);
-      return;
-    }
-    if (key.downArrow || key.rightArrow) {
-      setSelectedIndex((i) => (i + 1) % choices.length);
-      return;
-    }
+  /**
+   * 提交当前输入框内容。
+   *
+   * @param override 可选的替代文本；slash 菜单按 Enter 时用它直接提交选中的命令。
+   */
+  const submitInput = (override?: string) => {
+    // override 用于 slash 菜单：接受候选时直接提交候选文本。
+    const raw = override ?? text
+    // 空输入不提交。
+    if (!raw.trim()) return
+    // spinner 存在说明 agent 正在跑，避免重复提交。
+    if (spinner) return
+    // const expanded = override ? raw : expandPasteRefs(raw, pastedContents)
+    // 本期不展开粘贴引用，直接提交当前文本。
+    const expanded = raw
+    // pushHistory(override ? raw : text, override ? {} : pastedContents)
+    // 本期没有 paste ref，历史里的 pasted map 写空对象。
+    pushHistory(override ? raw : text, {})
+    // 提交后退出历史浏览状态。
+    resetHistoryNav()
+    // 把文本交给 App，由 App 决定是 slash command 还是 agent submit。
+    onSubmit(expanded)
+    // 提交后清空输入框和本地临时状态。
+    dispatch({ type: 'RESET' })
+    setPastedContents({})
+    setCompletionIndex(0)
+    setAtCompletionIndex(0)
+  }
 
-    // 数字键直接选择对应候选。
-    const digit = Number.parseInt(input, 10);
-    if (input.length === 1 && !Number.isNaN(digit) && digit >= 1 && digit <= choices.length) {
-      onAnswer(choices[digit - 1]!.value);
-      return;
-    }
+  /**
+   * 接受当前 @ 文件补全项。
+   *
+   * @returns 成功应用补全时返回 true。
+   */
+  const _acceptAtCompletion = (): boolean => {
+    // @ 文件补全本期关闭，所以这个函数固定返回 false。
+    // 保留函数是为了把恢复点留在原来调用位置附近。
+    // if (atMatches.length === 0) return false
+    // const picked = atMatches[safeAtIndex]
+    // if (!picked) return false
+    // const out = applyCompletion(text, atTrigger.atIdx, atTrigger.tokenEnd, picked)
+    // dispatch({ type: 'SET_TEXT', text: out.text, cursor: out.cursor })
+    // setAtCompletionIndex(0)
+    // return true
+    return false
+  }
 
-    // 权限问题的 y/a/n 快捷键。
-    if (question.kind === "permission") {
-      const lower = input.toLowerCase();
-      if (lower === "y") onAnswer("yes");
-      else if (lower === "a") onAnswer("always");
-      else if (lower === "n") onAnswer("no");
-    }
-  };
+  /**
+   * 权限弹窗的键盘处理。
+   *
+   * @param key 规范化后的按键名。
+   * @returns 如果当前按键被权限弹窗消费，返回 true。
+   */
+  const handlePermissionKey = (key: string): boolean => {
+    // 没有权限弹窗时，告诉外层“我没有消费这个按键”。
+    if (!permission) return false
+    // 是否支持 Always 取决于当前工具调用能不能生成持久授权规则。
+    const hasAlways = suggestRuleLabel(permission.toolName, permission.input, !!permission.mcp) !== null
+    // choices 的实际 resolve 值；数组顺序必须和 PermissionDialog 里的 choices 展示顺序一致。
+    const decisions: ('yes' | 'always' | 'no')[] = hasAlways ? ['yes', 'always', 'no'] : ['yes', 'no']
+    // maxIdx 用于上下循环选择。
+    const maxIdx = decisions.length - 1
+    // 上键向前移动，第一项再往上会循环到最后一项。
+    if (key === 'up') setPermissionSelected((idx) => (idx > 0 ? idx - 1 : maxIdx))
+    // 下键向后移动，最后一项再往下会循环到第一项。
+    else if (key === 'down') setPermissionSelected((idx) => (idx < maxIdx ? idx + 1 : 0))
+    // Enter 用当前选中项 resolve 给 useAgent。
+    else if (key === 'return') permission.onResolve(decisions[permissionSelected]!)
+    // 有权限弹窗时，其它按键也不应落到主输入框，因此返回 true 表示已消费。
+    else return true
+    return true
+  }
 
+  /**
+   * SelectOptions 弹窗的键盘处理。
+   *
+   * @param key 规范化后的按键名。
+   * @returns 如果当前按键被选择器消费，返回 true。
+   */
+  const handleSelectKey = (key: string): boolean => {
+    // 没有选择器弹窗时，告诉外层“我没有消费这个按键”。
+    if (!selectRequest) return false
+    // 当前高亮选项；freeform 选项会额外启用文本编辑逻辑。
+    const option = selectRequest.options[selectIndex]
+    // isFreeform 表示当前选项是否是 Other 自由输入。
+    const isFreeform = !!option?.freeform
+
+    if (key === 'escape') {
+      // dismissible 的选择器允许 Esc 关闭并返回空答案。
+      if (selectRequest.dismissible) selectRequest.onResolve('')
+      return true
+    }
+    if (key === 'up') {
+      // 上键循环移动选项。
+      setSelectIndex((idx) => (idx > 0 ? idx - 1 : selectRequest.options.length - 1))
+      return true
+    }
+    if (key === 'down') {
+      // 下键循环移动选项。
+      setSelectIndex((idx) => (idx < selectRequest.options.length - 1 ? idx + 1 : 0))
+      return true
+    }
+    if (isFreeform && key === 'backspace') {
+      // freeform 输入框中，Backspace 删除光标前字符。
+      setFreeform(({ text, cursor }) =>
+        cursor === 0 ? { text, cursor } : { text: text.slice(0, cursor - 1) + text.slice(cursor), cursor: cursor - 1 },
+      )
+      return true
+    }
+    if (isFreeform && key === 'delete') {
+      // freeform 输入框中，Delete 删除光标所在字符。
+      setFreeform(({ text, cursor }) =>
+        cursor >= text.length ? { text, cursor } : { text: text.slice(0, cursor) + text.slice(cursor + 1), cursor },
+      )
+      return true
+    }
+    if (isFreeform && key === 'left') {
+      // freeform 输入框中，左键移动内部光标。
+      setFreeform(({ text, cursor }) => ({ text, cursor: Math.max(0, cursor - 1) }))
+      return true
+    }
+    if (isFreeform && key === 'right') {
+      // freeform 输入框中，右键移动内部光标。
+      setFreeform(({ text, cursor }) => ({ text, cursor: Math.min(text.length, cursor + 1) }))
+      return true
+    }
+    if (isFreeform && key === 'home') {
+      // freeform 输入框中，Home 跳到开头。
+      setFreeform(({ text }) => ({ text, cursor: 0 }))
+      return true
+    }
+    if (isFreeform && key === 'end') {
+      // freeform 输入框中，End 跳到结尾。
+      setFreeform(({ text }) => ({ text, cursor: text.length }))
+      return true
+    }
+    if (key === 'return') {
+      // Enter 接受当前选项。
+      if (!option) return true
+      if (option.freeform) {
+        // freeform 只有非空输入才 resolve，避免误提交空 Other。
+        const trimmed = freeform.text.trim()
+        if (trimmed) selectRequest.onResolve(trimmed)
+      } else {
+        // 普通选项直接把 label 作为答案返回。
+        selectRequest.onResolve(option.label)
+      }
+      return true
+    }
+    // 有选择器时，其它按键不落到主输入框。
+    return true
+  }
+
+  /**
+   * 插入普通文本。
+   *
+   * @param chunk Ink useInput 传入的文本片段。
+   */
+  const handleTextInput = (chunk: string) => {
+    // Ink 可能传入空字符串；空输入无需处理。
+    if (!chunk) return
+    if (permission) {
+      // 权限弹窗打开时，y/a/n 快捷键直接 resolve，不插入主输入框。
+      const ch = chunk.toLowerCase()
+      if (ch === 'y') permission.onResolve('yes')
+      else if (ch === 'a' && suggestRuleLabel(permission.toolName, permission.input, !!permission.mcp) !== null)
+        permission.onResolve('always')
+      else if (ch === 'n') permission.onResolve('no')
+      return
+    }
+    if (selectRequest) {
+      // 选择器打开时，普通文本只写入 freeform 选项；普通选项忽略文本输入。
+      const option = selectRequest.options[selectIndex]
+      if (option?.freeform) {
+        // 在 freeform 光标位置插入文本，并把光标移动到插入内容之后。
+        setFreeform(({ text, cursor }) => ({
+          text: text.slice(0, cursor) + chunk + text.slice(cursor),
+          cursor: cursor + chunk.length,
+        }))
+      }
+      return
+    }
+    // 没有弹窗时，普通文本插入主输入框当前光标位置。
+    dispatch({ type: 'INSERT', pos: cursorRef.current, chunk })
+    // 输入改变后把补全菜单选择重置到第一项。
+    setCompletionIndex(0)
+    setAtCompletionIndex(0)
+  }
+
+  // 直接使用 Ink 的 useInput。本期不做 bracketed paste、自定义 debounce、Alt+Enter/Ctrl+Enter 编码兼容。
+  // usePromptInput 的旧接线保留在 git 历史和当前注释掉的 import 中，后续需要终端兼容增强时可以再接回。
   useInput(
     (input, key) => {
-      // Ctrl+C：App 负责第一次取消（同时按保守答案放行挂起的问题）、第二次退出。
-      if ((key.ctrl && input.toLowerCase() === "c") || input === "\x03") {
-        onInterrupt();
-        return;
+      // Ctrl+C 即使 disabled 也必须可用；App 会负责第一次取消、第二次退出。
+      if ((key.ctrl && input.toLowerCase() === 'c') || input === '\x03') {
+        onInterrupt()
+        return
       }
 
-      // 挂起问题优先：按键都服务问题本身，不进普通输入逻辑。
-      if (question && onAnswer) {
-        handleQuestionKey(input, key);
-        return;
+      // disabled 时只保留 Ctrl+C，其它输入全部忽略。
+      if (disabled) return
+
+      // Ink 的 key 类型没有声明 Home/End/PageUp/PageDown，这里用扩展类型读取可能存在的字段。
+      const extendedKey = key as typeof key & {
+        home?: boolean
+        end?: boolean
+        pageUp?: boolean
+        pageDown?: boolean
       }
 
       if (key.return) {
-        const trimmed = text.trim();
-        if (trimmed && !isLoading) {
-          onSubmit(trimmed);
-          setText("");
-          setCursor(0);
+        // 弹窗优先消费 Enter，避免主输入框误提交。
+        if (handlePermissionKey('return')) return
+        if (handleSelectKey('return')) return
+        // if (activeMenu === 'at' && acceptAtCompletion()) return
+        // 有 slash 补全候选时，Enter 直接提交候选命令。
+        if (currentMatch) {
+          submitInput(currentMatch.applyText)
+          return
         }
-        return;
+        // 反斜杠 + Enter 保留为“插入换行”的简易路径。
+        const cur = cursorRef.current
+        if (cur > 0 && text[cur - 1] === '\\') {
+          const next = text.slice(0, cur - 1) + '\n' + text.slice(cur)
+          dispatch({ type: 'SET_TEXT', text: next, cursor: cur })
+          setCompletionIndex(0)
+          return
+        }
+        // 普通 Enter 提交当前输入。
+        submitInput()
+        return
       }
 
       if (key.escape) {
-        if (isLoading && onEscapeCancel) onEscapeCancel();
-        return;
+        // 选择器优先处理 Esc，例如 dismissible picker 可以关闭。
+        if (handleSelectKey('escape')) return
+        // loading 时 Esc 走取消当前 agent turn。
+        if (isLoading && onEscapeCancel) {
+          onEscapeCancel()
+          return
+        }
+        // 输入框为空时 Esc 不做事。
+        if (text.length === 0 && Object.keys(pastedContents).length === 0) return
+        // 双击 Esc 清空输入；单击 Esc 只记录时间，避免误清。
+        const now = Date.now()
+        if (now - lastEscapeAtRef.current <= DOUBLE_ESC_WINDOW_MS) {
+          dispatch({ type: 'RESET' })
+          setPastedContents({})
+          setCompletionIndex(0)
+          setAtCompletionIndex(0)
+          resetHistoryNav()
+          lastEscapeAtRef.current = 0
+        } else {
+          lastEscapeAtRef.current = now
+        }
+        return
       }
 
-      applyEditKey(input, key);
-      // 注意：非 TTY 下 stdin.isTTY 是 undefined 而不是 false，
-      // 而 Ink 内部用 `isActive === false` 严格判断，undefined 会穿透并触发 setRawMode 崩溃，
-      // 所以这里必须归一成真正的布尔值。
+      if (key.backspace) {
+        // 选择器 freeform 优先处理 Backspace。
+        if (handleSelectKey('backspace')) return
+        const pos = cursorRef.current
+        // 光标在开头时无法继续删除。
+        if (pos === 0) return
+        // 本期无 paste ref，所以 Backspace 固定删除 1 个字符。
+        dispatch({ type: 'BACKSPACE_REF', pos, deleteCount: 1 })
+        setCompletionIndex(0)
+        return
+      }
+
+      if (key.delete) {
+        // 选择器 freeform 优先处理 Delete。
+        if (handleSelectKey('delete')) return
+        const pos = cursorRef.current
+        if (pos >= text.length) {
+          // Ink 在部分键盘上会把退格键报成 delete；光标在末尾时按“删前一个字符”处理，
+          // 避免最后一个字符永远删不掉。
+          if (pos > 0) dispatch({ type: 'BACKSPACE_REF', pos, deleteCount: 1 })
+        } else {
+          // 主输入框中间位置仍保持 Delete 语义：删除光标所在字符。
+          dispatch({ type: 'DELETE', pos })
+        }
+        return
+      }
+
+      if (key.leftArrow) {
+        // 选择器 freeform 优先处理左键。
+        if (handleSelectKey('left')) return
+        // 主输入框左键向前移动一个字符。
+        dispatch({ type: 'SET_CURSOR', cursor: Math.max(0, cursorRef.current - 1) })
+        return
+      }
+
+      if (key.rightArrow) {
+        // 选择器 freeform 优先处理右键。
+        if (handleSelectKey('right')) return
+        // 主输入框右键向后移动一个字符。
+        dispatch({ type: 'SET_CURSOR', cursor: Math.min(text.length, cursorRef.current + 1) })
+        return
+      }
+
+      if (extendedKey.home) {
+        // 选择器 freeform 优先处理 Home。
+        if (handleSelectKey('home')) return
+        // 主输入框 Home 跳到开头。
+        dispatch({ type: 'SET_CURSOR', cursor: 0 })
+        return
+      }
+
+      if (extendedKey.end) {
+        // 选择器 freeform 优先处理 End。
+        if (handleSelectKey('end')) return
+        // 主输入框 End 跳到结尾。
+        dispatch({ type: 'SET_CURSOR', cursor: text.length })
+        return
+      }
+
+      if (key.tab) {
+        // if (activeMenu === 'at' && acceptAtCompletion()) return
+        // Tab 接受 slash 补全，但不提交，只把候选写回输入框。
+        if (currentMatch) {
+          dispatch({ type: 'SET_TEXT', text: currentMatch.applyText, cursor: currentMatch.applyText.length })
+          setCompletionIndex(0)
+        }
+        return
+      }
+
+      if (key.upArrow) {
+        // 权限弹窗和选择器优先消费上下键。
+        if (handlePermissionKey('up')) return
+        if (handleSelectKey('up')) return
+        // inHistoryNav 用来判断当前是否正在浏览历史；浏览历史时 slash 菜单不抢单项上下键。
+        const inHistoryNav = historyIndexRef.current > 0
+        // if (activeMenu === 'at' && atMatches.length > 0 && (!inHistoryNav || atMatches.length > 1)) {
+        //   setAtCompletionIndex((idx) => (idx - 1 + atMatches.length) % atMatches.length)
+        //   return
+        // }
+        if (activeMenu === 'slash' && matches.length > 0 && (!inHistoryNav || matches.length > 1)) {
+          // slash 菜单打开时，上键移动菜单选中项。
+          setCompletionIndex((idx) => (idx - 1 + matches.length) % matches.length)
+          return
+        }
+        // 没有菜单可移动时，先尝试按逻辑行上移；到边界后再翻历史。
+        if (!moveCursorVertically(-1)) navigateHistoryUp()
+        return
+      }
+
+      if (key.downArrow) {
+        // 权限弹窗和选择器优先消费上下键。
+        if (handlePermissionKey('down')) return
+        if (handleSelectKey('down')) return
+        // inHistoryNav 用来判断当前是否正在浏览历史；浏览历史时 slash 菜单不抢单项上下键。
+        const inHistoryNav = historyIndexRef.current > 0
+        // if (activeMenu === 'at' && atMatches.length > 0 && (!inHistoryNav || atMatches.length > 1)) {
+        //   setAtCompletionIndex((idx) => (idx + 1) % atMatches.length)
+        //   return
+        // }
+        if (activeMenu === 'slash' && matches.length > 0 && (!inHistoryNav || matches.length > 1)) {
+          // slash 菜单打开时，下键移动菜单选中项。
+          setCompletionIndex((idx) => (idx + 1) % matches.length)
+          return
+        }
+        // 没有菜单可移动时，先尝试按逻辑行下移；到边界后再向较新的历史导航。
+        if (!moveCursorVertically(1)) navigateHistoryDown()
+        return
+      }
+
+      if (extendedKey.pageUp) {
+        // PageUp 一次跨多行移动光标。
+        moveCursorVertically(-MAX_VERTICAL_CURSOR_JUMP)
+        return
+      }
+
+      if (extendedKey.pageDown) {
+        // PageDown 一次跨多行移动光标。
+        moveCursorVertically(MAX_VERTICAL_CURSOR_JUMP)
+        return
+      }
+
+      // 没有命中特殊键时，把 input 当普通文本插入。
+      handleTextInput(input)
     },
-    { isActive: isRawModeSupported === true },
-  );
+    { isActive: !hidden },
+  )
+
+  if (hidden) return null
+
+  const menuSelected = safeCommandIndex
+  // const menuSelected = activeMenu === 'at' ? safeAtIndex : safeCommandIndex
 
   return (
     <Box flexDirection="column">
-      {/* 消息区：只渲染尾部一段，避免巨量消息撑爆动态区域。 */}
+      {/* 顶部历史区：只渲染最近一段消息，避免长会话撑满屏幕。 */}
       <Box flexDirection="column">
-        {messages.slice(-MAX_VISIBLE_MESSAGES).map((msg) => (
+        {visibleMessages.map((msg) => (
           <MessageBlock key={msg.id} msg={msg} />
         ))}
       </Box>
 
-      {/* 挂起中的交互问题（权限确认 / 计划审批 / askUser）。 */}
-      {question ? (
-        <QuestionBlock question={question} choices={choices} selectedIndex={selectedIndex} />
-      ) : null}
+      {/* 模型维护的 todo 面板，只有存在 todo 时 Todos 才会实际渲染。 */}
+      <Todos todos={todos} />
 
-      {/* 错误提示。 */}
+      {/* 当前 turn 或上一轮产生的错误提示。 */}
       {errorMessage ? <Text color="red">Error: {errorMessage}</Text> : null}
 
-      {/* agent 执行中显示 spinner 提示；有问题挂起时，问题本身就是当前活动。 */}
-      {isLoading && !question ? <Text color="gray">Thinking...</Text> : null}
+      {/* 正在运行的工具调用区，例如 shell/read/edit 的 live 状态。 */}
+      <ActiveTools tools={activeToolCalls} />
 
-      {/* 主输入框：光标前文本、反色光标字符、光标后文本分三段渲染。
-          自由输入问题挂起时，这个框就是答题框。 */}
-      <Box
-        borderStyle="single"
-        borderColor={isLoading ? "gray" : "#D97757"}
-        paddingX={1}
-      >
+      {/* agent 正在思考或使用工具时显示 spinner。 */}
+      {spinner ? (
+        <Text color={spinner.mode === 'tool-use' ? 'yellow' : 'gray'}>
+          {'⠋⠙⠹⠸'[spinnerFrame] ?? '⠋'} {spinner.label}...
+        </Text>
+      ) : null}
+
+      {/* 权限弹窗和 SelectOptions 弹窗互相独立，由 App/useAgent 传入请求对象控制。 */}
+      {permission ? <PermissionDialog permission={permission} selected={permissionSelected} /> : null}
+      {selectRequest ? <SelectDialog request={selectRequest} selected={selectIndex} freeform={freeform} /> : null}
+
+      {/* 补全菜单只在没有弹窗时显示；本期 activeMenu 只会是 slash。 */}
+      {activeMenu && !permission && !selectRequest ? (
+        <CompletionMenu kind={activeMenu} commandMatches={matches} atMatches={atMatches} selected={menuSelected} />
+      ) : null}
+
+      {/* 主输入框：光标前文本、反色光标字符、光标后文本分三段渲染。 */}
+      <Box borderStyle="single" borderColor={isLoading ? 'gray' : 'cyan'} paddingX={1}>
         <Text color="cyan">› </Text>
         <Text>{text.slice(0, cursor)}</Text>
-        <Text inverse>{text[cursor] ?? " "}</Text>
+        <Text inverse>{text[cursor] ?? ' '}</Text>
         <Text>{text.slice(cursor + 1)}</Text>
       </Box>
 
-      {/* 底部短提示，目前只用于 “Press Ctrl+C again to exit”。 */}
-      {notice ? <Text color="yellow">{notice}</Text> : null}
+      {/* 底部状态行：权限模式、上下文用量、临时 notice。 */}
+      <Footer permissionMode={permissionMode} contextUsage={contextUsage} notice={notice} />
     </Box>
-  );
+  )
 }

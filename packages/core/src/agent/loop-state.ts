@@ -29,7 +29,7 @@ export interface LoopState {
   // 当前审批模式。用户可通过 /plan 改，模型也可通过 enterPlanMode/exitPlanMode 工具改。
   // tool-execution 会读取它来决定系统提示词 overlay 和工具暴露方式。
   permissionMode: PermissionMode
-  // 计划模式下的计划文件路径：.x-code/plans/{sessionId}.md；非计划模式为 null。
+  // 计划模式下的计划文件路径：.tegent/plans/{sessionId}.md；非计划模式为 null。
   // 第一次 enterPlanMode 时懒创建，并在本次计划会话中复用，退出时清空。
   currentPlanPath: string | null
   // 从用户第一条消息生成的小写短横线 slug，用于给 session usage 文件起可读名字。
@@ -66,7 +66,7 @@ export interface LoopState {
 
 /** 生成可读的 session id：YYYYMMDD-HHMMSS-mmm。
  *  使用本地时间，末尾毫秒用于区分快速连续启动的会话。
- *  这种格式比 Date.now().toString(36) 生成的短码更容易在 .x-code/sessions/ 中肉眼扫描，
+ *  这种格式比 Date.now().toString(36) 生成的短码更容易在 .tegent/sessions/ 中肉眼扫描，
  *  也和 plan 文件命名保持一致，目录排序体验更统一。 */
 function generateSessionId(now: Date = new Date()): string {
   // 使用本地时间拼出可排序、可肉眼识别的 ID。

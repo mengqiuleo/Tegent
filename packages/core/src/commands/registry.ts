@@ -146,7 +146,7 @@ export async function reloadCommandRegistry(
  * 插件重新安装时可能被清理，因此适合引用插件随包脚本，不适合作持久化数据目录。
  *
  * `${CLAUDE_PLUGIN_DATA}`：插件专属持久数据目录，位于
- * `~/.x-code/plugins/data/<id>/`。首次替换时会自动创建，重装和升级插件后仍保留。
+ * `~/.tegent/plugins/data/<id>/`。首次替换时会自动创建，重装和升级插件后仍保留。
  * 如果命令没有插件上下文，则保持为空字符串。
  *
  * @param cmd - 要展开的命令定义。
