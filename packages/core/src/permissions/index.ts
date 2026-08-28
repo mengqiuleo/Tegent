@@ -215,7 +215,7 @@ export async function checkPermission(
         // 先加入内存规则，本会话立即生效。
         addSessionAllowRule(rule)
 
-        // 如果规则允许持久化，并且有 cwd，就写入 `.x-code/local/permissions.json`。
+        // 如果规则允许持久化，并且有 cwd，就写入 `.tegent/local/permissions.json`。
         if (result.persist && cwd) persistRule(cwd, rule)
       }
     }

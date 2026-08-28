@@ -4,23 +4,35 @@
 // diff payload 是 UI 侧旁路数据，不会进入 state.messages，也不会再发给模型。
 import { structuredPatch } from 'diff'
 
+// 中文导读：
+// 这个文件把 writeFile/edit 的实际文件变化转成 UI 可渲染的结构化 diff。
+// 它不参与模型上下文：模型只看到“文件已编辑”的短结果，彩色 diff 是给终端用户看的旁路数据。
 
 /** 一个连续 diff hunk。
  *  形状和 diff 包的 StructuredPatchHunk 接近，但这里重新定义一份，
  *  这样外部消费者不需要为了类型依赖 diff 包。lines 中每行开头带标记：
  *  空格表示上下文，+ 表示新增，- 表示删除。 */
 export interface EditDiffHunk {
+  // 旧文件中该 hunk 的起始行号。
   oldStart: number
+  // 旧文件中该 hunk 覆盖的行数。
   oldLines: number
+  // 新文件中该 hunk 的起始行号。
   newStart: number
+  // 新文件中该 hunk 覆盖的行数。
   newLines: number
+  // 每行以空格/+/- 开头，分别表示上下文、增加、删除。
   lines: string[]
 }
 
 export interface EditDiffPayload {
+  // 被编辑的文件路径。
   filePath: string
+  // 结构化 diff hunk 列表。
   hunks: EditDiffHunk[]
+  // 增加行数。
   additions: number
+  // 删除行数。
   removals: number
   /** true 表示写入前文件不存在。
    *  UI 会把标题从“新增 X 行、删除 Y 行”切换成“创建 N 行”，

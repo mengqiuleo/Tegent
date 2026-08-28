@@ -17,7 +17,7 @@ import { generateText } from 'ai'
 import type { LanguageModel } from 'ai'
 
 import { getThinkingProviderOptions } from '../providers/thinking.js'
-import { TEGENT_DIR } from '../constants.js'
+import { TEGENT_DIR } from '../utils.js'
 
 const PLANS_SUBDIR = 'plans'
 const SLUG_MAX_LEN = 40
@@ -45,6 +45,10 @@ export function slugify(text: string): string {
     .replace(/-+$/g, '')
 }
 
+/** 把 Date 格式化成 `YYYYMMDD-HHMMSS`。
+ *
+ * 使用本地时间，不加时区后缀。这样和旧版 plan 文件命名保持一致，
+ * 用户在目录里按视觉扫描时不会遇到两套格式。 */
 function formatTimestamp(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return (
@@ -121,19 +125,13 @@ export async function generateTaskSlug(
     return localSlug
   }
 
-
   try {
     const { text, usage, finishReason } = await generateText({
       model,
-      // exactOptionalPropertyTypes 下不能显式传 abortSignal: undefined，
-      // 所以只有真的有 signal 时才带上这个属性。
-      ...(signal ? { abortSignal: signal } : {}),
-      // getThinkingProviderOptions 永远返回对象（未知 provider 返回空对象），
-      // 用 NonNullable 把断言类型里的 undefined 去掉，
-      // 避免 exactOptionalPropertyTypes 下显式传入 undefined。
-      providerOptions: getThinkingProviderOptions(modelId, false) as NonNullable<
-        Parameters<typeof generateText>[0]['providerOptions']
-      >,
+      abortSignal: signal,
+      providerOptions: getThinkingProviderOptions(modelId, false) as Parameters<
+        typeof generateText
+      >[0]['providerOptions'],
       system:
         'You convert user task descriptions into short English filename slugs. ' +
         'Reply with ONLY 2 to 4 lowercase English words separated by spaces. ' +
@@ -143,16 +141,27 @@ export async function generateTaskSlug(
       maxOutputTokens: SLUG_MAX_OUTPUT_TOKENS,
     })
     const slug = slugify(text)
+
     return slug
   } catch (err) {
+
     return ''
   }
 }
 
+/** 确保计划目录存在。
+ *
+ * 使用 recursive mkdir，所以不需要先单独创建 `.tegent/`。
+ * 一个新项目第一次写 plan 时，父目录会自动一起创建。 */
 export async function ensurePlanDir(): Promise<void> {
   await fs.mkdir(plansDir(), { recursive: true })
 }
 
+/** 读取 planPath 对应的计划正文。
+ *
+ * 文件不存在或读取失败时返回空字符串。
+ * exitPlanMode 会用它抓取模型目前已经写下的计划；
+ * “还没有写计划”虽然不太有用，但仍是合法状态。 */
 export async function readPlan(planPath: string): Promise<string> {
   try {
     return await fs.readFile(planPath, 'utf-8')
@@ -161,6 +170,11 @@ export async function readPlan(planPath: string): Promise<string> {
   }
 }
 
+/** 把计划正文写入 planPath。
+ *
+ * exitPlanMode 在模型传入 plan override 时会调用它，
+ * 保证磁盘记录和用户正在审批的文本一致。
+ * 返回写入路径；它总是等于输入 planPath。 */
 export async function writePlan(planPath: string, body: string): Promise<string> {
   await ensurePlanDir()
   await fs.writeFile(planPath, body, 'utf-8')

@@ -1,0 +1,16 @@
+{
+  "SessionStart": [
+    {
+      "command": "node \"${pluginDir}/hooks/scripts/session-log.mjs\" \"${pluginDataDir}\"",
+      "description": "把每次会话启动记录追加到插件的持久化数据目录"
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "shell",
+      "command": "node \"${pluginDir}/hooks/scripts/shell-audit.mjs\" \"${pluginDataDir}\"",
+      "description": "记录 agent 执行过的 shell 命令，便于事后审计",
+      "timeout": 5000
+    }
+  ]
+}

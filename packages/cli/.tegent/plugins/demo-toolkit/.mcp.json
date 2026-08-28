@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "demo-toolkit": {
+      "command": "node",
+      "args": ["${pluginDir}/mcp/demo-server.mjs"]
+    }
+  }
+}

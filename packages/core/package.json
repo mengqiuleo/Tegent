@@ -36,7 +36,12 @@
     "diff": "^9.0.0",
     "execa": "^10.0.1",
     "file-type": "^22.0.2",
+    "mammoth": "^1.12.1",
+    "officeparser": "^7.8.0",
+    "pdf-parse": "^2.4.5",
+    "tesseract.js": "^7.0.0",
     "turndown": "^7.2.4",
+    "xlsx": "^0.18.5",
     "zhipu-ai-provider": "^0.4.0"
   },
   "devDependencies": {

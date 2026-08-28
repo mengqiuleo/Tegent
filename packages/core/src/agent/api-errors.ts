@@ -1,4 +1,5 @@
-/** 请求超过了模型上下文窗口。 */
+
+/** 这些子串说明请求超过了模型上下文窗口。 */
 const CONTEXT_TOO_LONG_PATTERNS = [
   'maximum context length',
   'context_length_exceeded',
@@ -8,7 +9,6 @@ const CONTEXT_TOO_LONG_PATTERNS = [
   'input tokens',
   'context window',
 ] as const
-
 
 // 这个文件把 provider/AI SDK 抛出来的各种错误归类成用户能看懂的提示。
 // classifyApiError() 是主入口：先抽 HTTP 状态码和真实 provider message，

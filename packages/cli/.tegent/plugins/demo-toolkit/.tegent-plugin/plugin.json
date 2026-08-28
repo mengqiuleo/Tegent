@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1",
+  "name": "demo-toolkit",
+  "version": "0.1.0",
+  "description": "tegent 插件系统演示：包含 2 个 skills、2 个 agents、2 个 commands 和 2 个 hooks。",
+  "author": { "name": "panjingyi" },
+  "keywords": ["demo", "toolkit", "tegent"],
+  "license": "MIT"
+}
