@@ -135,7 +135,7 @@ async function readGitBranch(cwd: string): Promise<string | undefined> {
   try {
     const head = await readFile(path.join(cwd, '.git', 'HEAD'), 'utf-8')
     const m = head.match(/^ref: refs\/heads\/(.+)$/m)
-    return m ? m[1].trim() : undefined
+    return m?.[1]?.trim()
   } catch {
     return undefined
   }

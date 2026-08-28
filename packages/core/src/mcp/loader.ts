@@ -73,7 +73,7 @@ export async function loadMcpFromDisk(opts: {
   extraServers?: Record<string, McpServerConfig>
 }): Promise<LoadResult> {
   const userServers = await readMcpServersFromFile(getUserConfigPath())
-  const projectServers = await readMcpServersFromFile(path.join(opts.cwd, XCODE_DIR, 'config.json'))
+  const projectServers = await readMcpServersFromFile(path.join(opts.cwd, TEGENT_DIR, 'config.json'))
   return loadMcpServers({
     userServers,
     projectServers,

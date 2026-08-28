@@ -138,7 +138,7 @@ function tagLastTool(tools: Record<string, any> | undefined): Record<string, any
   if (!tools) return tools // 没有工具表就直接返回 undefined。
   const names = Object.keys(tools) // 拿到工具名列表，顺序就是对象键的插入顺序。
   if (names.length === 0) return tools // 工具表为空时也不需要处理。
-  const lastName = names[names.length - 1] // 找到最后一个工具名。
+  const lastName = names[names.length - 1] ?? '' // 找到最后一个工具名；上面已排除空表，`?? ''` 只是为了类型收窄。
   const lastTool = tools[lastName] // 取出最后一个工具定义。
   const existing = (lastTool?.providerOptions ?? {}) as Record<string, Record<string, unknown>> // 保留这个工具已有的 providerOptions。
   const tagged = { // 构造一个新的工具对象。

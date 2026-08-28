@@ -254,7 +254,7 @@ function parseMemoryFile(content: string): KnowledgeFact[] {
     // 如果这一行是分类标题，就更新 currentCategory，并跳过本行剩余解析。
     if (categoryMatch) {
       // trim 去掉标题前后多余空格，让 `### user ` 也能正常识别。
-      currentCategory = categoryMatch[1].trim()
+      currentCategory = categoryMatch[1]?.trim() ?? ''
 
       // 分类标题不是事实本身，所以继续读下一行。
       continue
@@ -267,13 +267,14 @@ function parseMemoryFile(content: string): KnowledgeFact[] {
     if (factMatch && isValidCategory(currentCategory)) {
       facts.push({
         // 正则第 1 组是日期，格式固定为 YYYY-MM-DD。
-        date: factMatch[1],
+        // 捕获组在 match 成功时必然存在，`?? ''` 只是满足 noUncheckedIndexedAccess。
+        date: factMatch[1] ?? '',
 
         // 正则第 2 组是 key；trim 防止冒号前有人手动多写了空格。
-        key: factMatch[2].trim(),
+        key: factMatch[2]?.trim() ?? '',
 
         // 正则第 3 组是事实内容；trim 防止行尾空格进入记忆。
-        fact: factMatch[3].trim(),
+        fact: factMatch[3]?.trim() ?? '',
 
         // currentCategory 已经过 isValidCategory 收窄，TypeScript 知道它是合法分类。
         category: currentCategory,

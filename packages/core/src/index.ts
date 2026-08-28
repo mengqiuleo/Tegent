@@ -123,7 +123,6 @@ export { PluginRegistry, emptyPluginRegistry } from './plugins/registry.js'
 export type { PluginReloadSummary } from './plugins/registry.js'
 export {
   buildPluginIntegration,
-  debugLogIntegrationDiagnostics,
   getPluginMcpServersFromDisk,
 } from './plugins/integration.js'
 export type { PluginIntegrationOutput } from './plugins/integration.js'

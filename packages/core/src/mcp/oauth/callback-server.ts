@@ -12,7 +12,7 @@
 //   - 只接受第一次匹配请求，后续请求只会看到“授权已完成”的友好页面；
 //   - 这里不校验 `state`，那是 SDK 的职责；本层只原样转发授权服务器返回值。
 import http from 'node:http'
-import { AddressInfo } from 'node:net'
+import type { AddressInfo } from 'node:net'
 
 
 export interface CallbackResult {

@@ -82,7 +82,9 @@ export function getContextWindow(modelId: string): number {
   if (exact !== undefined) return exact
 
   // 没有精确命中时，从 `provider:model` 里取冒号前的 provider。
-  const provider = modelId.split(':')[0]
+  // split 结果至少有一个元素，`?? ''` 只是满足 noUncheckedIndexedAccess；
+  // 空串不会命中任何 provider，仍会退到 DEFAULT_CONTEXT_WINDOW。
+  const provider = modelId.split(':')[0] ?? ''
 
   // 再查 provider 默认值；如果 provider 也未知，就退回全局默认窗口。
   return PROVIDER_CONTEXT_WINDOWS.get(provider) ?? DEFAULT_CONTEXT_WINDOW
