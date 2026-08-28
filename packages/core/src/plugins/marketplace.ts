@@ -317,8 +317,7 @@ function freshKnown(): KnownMarketplaces {
 /**
  * 读取用户已订阅 marketplace 列表。
  *
- * 文件不存在、JSON 损坏或结构不符合预期时会降级为空状态。损坏场景会写 debug log，
- * 但不会阻塞 CLI 启动。
+ * 文件不存在、JSON 损坏或结构不符合预期时会降级为空状态, 不会阻塞 cli 启动
  *
  * @returns 当前 known_marketplaces.json 解析结果。
  */

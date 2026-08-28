@@ -244,16 +244,13 @@ async function main() {
   // `anthropic-marketplace` 订阅写入 known_marketplaces.json。
   // 这是幂等操作——明确删除过该订阅的用户不会被重新加回来。
   // 要在 loadAllPlugins 之前做，这样首次运行就能看到一个已填充的市场列表。
-  //  确保默认插件市场订阅存在；失败只写调试日志，不中断启动。
+  //  确保默认插件市场订阅存在；失败不中断启动。
   await ensureDefaultMarketplaces().catch((err) => {})
 
   //  插件必须在 skill / 子 agent / MCP 注册表之前加载，
   // 这样插件的贡献才能被合并进各个注册表。
   // 非致命的加载错误会以和下面 `[mcp] config error in ...` 相同的样式输出到 stderr——
   // 一个坏插件绝不会阻塞其他插件。
-  // 详细诊断（冲突、不支持的命令、钩子错误）通过 debugLogIntegrationDiagnostics 写入 debug.log，
-  // 供 `/plugin doctor` 命令展示。
-  //  加载所有插件。
   const pluginLoad = await loadAllPlugins({ cwd: process.cwd() })
   //  遍历插件加载错误，把每个错误展示给用户。
   for (const e of pluginLoad.registry.loadErrors()) {

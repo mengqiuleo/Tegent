@@ -29,6 +29,7 @@ import { HookBus } from '../hooks/bus.js'
 import { HookConfigParseError, parseHookConfig } from '../hooks/config-schema.js'
 import { HookRegistry, buildHookRegistry } from '../hooks/registry.js'
 import type { HookConfig } from '../hooks/types.js'
+import { type VariableContext, buildVariableContext, expandVariables } from '../hooks/variables.js'
 import { parseServersBlock } from '../mcp/config-schema.js'
 import { isStdioConfig } from '../mcp/types.js'
 import type { McpServerConfig } from '../mcp/types.js'
@@ -82,6 +83,15 @@ export interface PluginIntegrationOutput {
   hookErrors: Array<{ pluginId: string; message: string }>
 }
 
+export interface BuildPluginIntegrationOptions {
+  /**
+   * 变量展开使用的会话工作目录，影响 `${cwd}`。
+   *
+   * 默认 `process.cwd()`。CLI 侧通常不传；测试希望 `${cwd}` 指向临时目录时使用。
+   */
+  cwd?: string
+}
+
 /**
  * 根据插件加载结果构建所有下游集成数据。
  *
@@ -89,9 +99,13 @@ export interface PluginIntegrationOutput {
  * hooks 会构建成 HookRegistry 和 HookBus。非致命错误收集在输出对象里。
  *
  * @param load `loadAllPlugins` 的输出。
+ * @param opts 集成选项，目前只有变量展开使用的 `cwd`。
  * @returns 可直接传给 skill / agent / command / MCP / hook 子系统的集成结果。
  */
-export async function buildPluginIntegration(load: LoadResult): Promise<PluginIntegrationOutput> {
+export async function buildPluginIntegration(
+  load: LoadResult,
+  opts: BuildPluginIntegrationOptions = {},
+): Promise<PluginIntegrationOutput> {
   // Hook registry 最后构建，因为遍历插件时要先收集每个插件自己的 hook config。
   // 所有 rootDir 都来自 LoadedPlugin，只有遍历时才完整可得。
   const hookInputs: Array<{ pluginId: string; pluginDir: string; config: HookConfig }> = []
@@ -129,7 +143,7 @@ export async function buildPluginIntegration(load: LoadResult): Promise<PluginIn
     }
 
     if (contrib.mcpServers) {
-      const servers = await resolvePluginMcpServers(plugin, contrib.mcpServers, out)
+      const servers = await resolvePluginMcpServers(plugin, contrib.mcpServers, out, opts.cwd)
       for (const [name, cfg] of Object.entries(servers)) {
         const prevOwner = mcpOwners.get(name)
         if (prevOwner !== undefined) {
@@ -190,6 +204,49 @@ async function resolvePluginHooks(
 }
 
 /**
+ * 对插件贡献的 stdio MCP server 配置执行变量展开。
+ *
+ * 支持的变量与 hooks executor 一致（`${pluginDir}`、`${pluginDataDir}`、
+ * `${cwd}`、`${homedir}`、`${sep}`、`${env:NAME}`，见 hooks/variables.ts）；
+ * 此外把 `${CLAUDE_PLUGIN_ROOT}` 当作 `${pluginDir}` 的别名处理——真实
+ * Claude Code 插件的 `.mcp.json` 普遍用它引用随包脚本，不展开就无法在
+ * tegent 里运行，这是两条插件生态保持兼容的必要一环。
+ *
+ * 只展开 stdio 配置的 `command` / `args` / `cwd` / `env` 值；HTTP 配置的
+ * `url` / `headers` 原样保留。远端端点不引用插件本地路径，而 header 里的
+ * 凭据语义上应走 OAuth 流程而不是文本替换。未知变量同样保留原样，
+ * 让 spawn 的报错能暴露真正的拼写问题（与 hooks 的策略一致）。
+ *
+ * @param servers schema 校验通过后的 server 映射。
+ * @param vars 变量上下文，通常由 `buildVariableContext` 构造。
+ * @returns 展开后的新映射；入参对象不会被修改。
+ */
+export function expandMcpServerVariables(
+  servers: Record<string, McpServerConfig>,
+  vars: VariableContext,
+): Record<string, McpServerConfig> {
+  const expand = (s: string) => expandVariables(s.replaceAll('${CLAUDE_PLUGIN_ROOT}', '${pluginDir}'), vars)
+
+  const out: Record<string, McpServerConfig> = {}
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (!isStdioConfig(cfg)) {
+      out[name] = cfg
+      continue
+    }
+    out[name] = {
+      ...cfg,
+      command: expand(cfg.command),
+      ...(cfg.args ? { args: cfg.args.map(expand) } : {}),
+      ...(cfg.cwd ? { cwd: expand(cfg.cwd) } : {}),
+      ...(cfg.env
+        ? { env: Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, expand(v)] as const)) }
+        : {}),
+    }
+  }
+  return out
+}
+
+/**
  * 从 `.mcp.json` 文件内容中提取 `name → cfg` server 块。
  *
  * 接受两种形状：
@@ -215,19 +272,21 @@ export function extractMcpServersBlock(parsed: unknown): unknown {
 /**
  * 解析单个插件的 mcpServers 贡献项。
  *
- * 函数会读取路径或内联对象，调用 MCP schema parser 校验，再把插件 userConfig
- * 合并到 stdio server 的 env 中。读取、解析和 env 合并错误都会记录到 `out`，
- * 不会中断整个插件集成过程。
+ * 函数会读取路径或内联对象，调用 MCP schema parser 校验，对 stdio 配置执行
+ * 变量展开，再把插件 userConfig 合并到 stdio server 的 env 中。读取、解析和
+ * env 合并错误都会记录到 `out`，不会中断整个插件集成过程。
  *
  * @param plugin mcpServers 所属插件。
  * @param contrib loader 解析出的 mcpServers 贡献描述。
  * @param out 当前集成输出，用于记录错误。
+ * @param cwd 变量展开使用的会话工作目录；缺省时取 `process.cwd()`。
  * @returns 解析成功的 MCP server 映射；失败时返回空对象。
  */
 async function resolvePluginMcpServers(
   plugin: LoadedPlugin,
   contrib: NonNullable<ResolvedContributions['mcpServers']>,
   out: PluginIntegrationOutput,
+  cwd: string = process.cwd(),
 ): Promise<Record<string, McpServerConfig>> {
   let rawBlock: unknown
   if (contrib.kind === 'inline') {
@@ -251,6 +310,11 @@ async function resolvePluginMcpServers(
     out.mcpErrors.push({ pluginId: plugin.id, message: `mcpServers.${e.name}: ${e.message}` })
   }
 
+  // stdio 命令里的插件变量在这里展开；schema 校验先于展开，保证结构错误
+  // 仍然由 MCP config-schema 报告，而不是变成展开后的奇怪字符串。
+  const vars = buildVariableContext({ pluginDir: plugin.rootDir, cwd, pluginId: plugin.id })
+  const expanded = expandMcpServerVariables(servers, vars)
+
   // 把所属插件的 userConfig 值合并进每个 server 的 env。
   // 作者如果希望使用 manifest userConfig 中声明的 API key，只需要在 mcpServers
   // entry 里把它当普通环境变量引用；也可以不显式引用，依赖子进程继承 env。
@@ -258,12 +322,12 @@ async function resolvePluginMcpServers(
   try {
     const pluginEnv = await getPluginUserConfigEnv(plugin.id)
     if (Object.keys(pluginEnv).length > 0) {
-      for (const name of Object.keys(servers)) {
-        const cfg = servers[name]!
+      for (const name of Object.keys(expanded)) {
+        const cfg = expanded[name]!
         // 只有 stdio server 会启动子进程并接收 env；HTTP server 是远端端点，
         // 合并环境变量没有意义。
         if (isStdioConfig(cfg)) {
-          servers[name] = { ...cfg, env: { ...pluginEnv, ...(cfg.env ?? {}) } }
+          expanded[name] = { ...cfg, env: { ...pluginEnv, ...(cfg.env ?? {}) } }
         }
       }
     }
@@ -271,7 +335,7 @@ async function resolvePluginMcpServers(
     out.mcpErrors.push({ pluginId: plugin.id, message: `userConfig env merge: ${String(err)}` })
   }
 
-  return servers
+  return expanded
 }
 
 /**

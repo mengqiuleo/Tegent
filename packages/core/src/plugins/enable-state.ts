@@ -99,7 +99,7 @@ export class EnableState {
   private constructor(private readonly perScope: Map<PluginScope, Record<string, boolean>>) {}
 
   /**
-   * 读取所有作用域的 settings 文件并构建一个状态快照。
+   * 读取用户级别，项目级别下的 settings 文件并构建一个状态快照。
    *
    * 这个快照创建后不会原地追踪磁盘变化；调用方在写入 settings.json 后，
    * 需要再次调用 `EnableState.load()` 得到新快照。`cwd` 控制 `project`

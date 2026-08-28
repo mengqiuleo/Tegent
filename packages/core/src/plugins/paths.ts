@@ -129,9 +129,7 @@ export function projectPluginsDir(cwd: string): string {
 /**
  * loader 会按优先级探测这些相对 manifest 路径，第一个命中的路径生效。
  *
- * 这里故意接受 Claude Code 的 `.claude-plugin/plugin.json`，让为 Claude
- * Code 编写的插件无需修改就能安装到 tegent-cli；参见
- * [[plugin-marketplace-design]] 第 3 节的跨产品兼容性设计。
+ * 这里故意接受 Claude Code 的 `.claude-plugin/plugin.json`，让为 Claude Code 编写的插件无需修改就能安装到 tegent
  */
 export const MANIFEST_CANDIDATES: ReadonlyArray<{ format: 'native' | 'claude' | 'bare'; rel: string }> = [
   { format: 'native', rel: '.tegent-plugin/plugin.json' },

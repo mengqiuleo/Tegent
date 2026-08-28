@@ -144,4 +144,10 @@ vite.config.ts.timestamp-*
 
 
 
-.tegent/
+# tegent 运行时目录：忽略其中的产物，但保留随仓库提交的项目插件。
+# 注意必须忽略目录内容（.tegent/*）而不是目录本身（.tegent/），
+# 否则 git 不会向下遍历，下面的 ! 反包含永远不生效。
+# 中间带斜杠的 pattern 锚定在仓库根，因此 packages/cli 下需要单独一条。
+.tegent/*
+packages/cli/.tegent/*
+!packages/cli/.tegent/plugins/
