@@ -16,46 +16,12 @@ import { Chalk } from 'chalk'
 
 import type { EditDiffHunk, EditDiffPayload } from '@tegent/core'
 
-import { type SyntaxThemeName, applyColor, detectLanguage, highlightLine } from './syntax-highlight.js'
+import { applyColor, detectLanguage, highlightLine } from './syntax-highlight.js'
 import { sliceByWidth, visualWidth } from './text-width.js'
-import { type ThemeName, getThemeColors } from './theme.js'
+import { DIFF_ADDED_BG, DIFF_ADDED_FG, DIFF_REMOVED_BG, DIFF_REMOVED_FG, DIFF_TEXT_FG } from './theme.js'
 import { RESULT_INDENT } from './utils.js'
 
 const c = new Chalk({ level: 3 })
-
-/** Apply a theme's diff bg color to text. Three value shapes:
- *   - `'#rrggbb'` — true-color hex, via chalk.bgHex
- *   - `'ansi:default'` — leave bg untouched (terminal default). The
- *     ANSI-only themes use this and rely on a colored DECORATION fg
- *     to mark `-` lines; bg coloring would over-paint the user's
- *     terminal background.
- *   - `'ansi:green'` / `'ansi:red'` — named ANSI bg (currently unused
- *     but kept for completeness). */
-function applyBg(text: string, color: string): string {
-  if (color === 'ansi:default') return text
-  if (color.startsWith('ansi:')) {
-    const name = color.slice(5)
-    if (name === 'green') return c.bgGreen(text)
-    if (name === 'red') return c.bgRed(text)
-    if (name === 'blue') return c.bgBlue(text)
-    if (name === 'yellow') return c.bgYellow(text)
-    return text
-  }
-  return c.bgHex(color)(text)
-}
-
-/** Apply a theme's gutter (line number + sigil) fg color. Mirrors
- *  applyBg — same value shapes, fg-side. CC paints the gutter in a
- *  saturated decoration color so the line-number column pops off the
- *  near-black bg; without it, "1 +" disappears into the diff bg. */
-function applyGutterFg(text: string, color: string): string {
-  if (color === 'ansi:green') return c.green(text)
-  if (color === 'ansi:red') return c.red(text)
-  if (color === 'ansi:blue') return c.blue(text)
-  if (color === 'ansi:yellow') return c.yellow(text)
-  if (color.startsWith('#')) return c.hex(color)(text)
-  return text
-}
 
 /** Cap an individual diff body's height. Multi-hunk patches with hundreds
  *  of lines aren't useful in scrollback (the user would scroll past most
@@ -152,26 +118,7 @@ function fitCode(code: string, width: number): string {
  * code column from what remains. Falls back to 120 if the terminal width
  * is unknown / nonsensical.
  */
-function renderHunks(
-  payload: EditDiffPayload,
-  terminalWidth: number,
-  syntaxTheme?: SyntaxThemeName,
-  /** UI theme to read diff bg colors from. `undefined` → use the
-   *  module-level active theme (real renders). The `/theme` picker
-   *  passes each candidate theme's name when building previews so the
-   *  user sees each theme's actual diff colors side by side. */
-  uiTheme?: ThemeName,
-): string[] {
-  const themeColors = getThemeColors(uiTheme)
-  // ANSI mode is detected by the `'ansi:default'` bg sentinel — those
-  // themes can't paint hex bg (16-color compat), so they communicate
-  // remove rows via DIM instead. Mirrors CC color-diff/index.ts:924.
-  const isAnsiMode = themeColors.diffAdded === 'ansi:default'
-  // CC paints unhighlighted text inside diff rows in `Theme.foreground`
-  // (#f8f8f2 dark / #333333 light). Without it our unmatched chars
-  // fall back to terminal default `#cccccc` and read as visibly dimmer
-  // than CC. ANSI themes pass null (honor terminal palette).
-  const defaultFg = themeColors.defaultFg
+function renderHunks(payload: EditDiffPayload, terminalWidth: number): string[] {
   const cols = Math.max(40, terminalWidth)
   const lineNumWidth = Math.max(1, String(maxLineNumber(payload.hunks)).length)
   // Gutter format: " <num> <sigil> " — 1 leading space + num + 1 space +
@@ -226,41 +173,33 @@ function renderHunks(
       if (sigil === '+') {
         // `+` row: bg + decorated gutter + syntax-highlighted code.
         // CC always highlights `+` lines (they ARE the new code).
-        // We pre-paint the gutter in the theme's add-decoration color
+        // We pre-paint the gutter in the add-decoration color
         // BEFORE wrapping the row in bg, so the colored fg sticks.
-        // defaultFg is threaded through so unmatched chars (`;`, `(`,
+        // DIFF_TEXT_FG is threaded through so unmatched chars (`;`, `(`,
         // `)`, `{`, `}`) and undecorated identifiers (e.g. `log` in
-        // `console.log`) get CC's bright cream/dark-gray instead of
+        // `console.log`) get CC's bright cream instead of
         // the terminal default white.
-        const code = highlightLine(fitted, lang, syntaxTheme, defaultFg)
-        const coloredGutter = applyGutterFg(gutter, themeColors.diffAddedDecoration)
-        styled = applyBg(coloredGutter + code + padding, themeColors.diffAdded)
+        const code = highlightLine(fitted, lang, DIFF_TEXT_FG)
+        const coloredGutter = c.hex(DIFF_ADDED_FG)(gutter)
+        styled = c.bgHex(DIFF_ADDED_BG)(coloredGutter + code + padding)
       } else if (sigil === '-') {
         // `-` row: bg + decorated gutter + PLAIN code (no syntax
-        // highlighting, ever — including in picker previews). CC's
-        // color-diff/index.ts:916-918 always passes the `-` line
-        // through `defaultStyle(theme)` instead of highlightLine, so
-        // the deleted text is white-on-red across both real diffs and
-        // theme previews. Multi-color fg on top of the saturated red
+        // highlighting, ever). CC's color-diff/index.ts:916-918 always
+        // passes the `-` line through `defaultStyle(theme)` instead of
+        // highlightLine. Multi-color fg on top of the saturated red
         // bg also fights itself visually; plain text reads as "this
-        // is going away" more cleanly. We DO apply defaultFg though —
+        // is going away" more cleanly. We DO apply DIFF_TEXT_FG though —
         // it's how CC's `defaultStyle` makes the deleted text visibly
         // brighter than terminal default.
-        const plainCode = defaultFg ? applyColor(fitted, defaultFg) : fitted
-        const coloredGutter = applyGutterFg(gutter, themeColors.diffRemovedDecoration)
-        let row = applyBg(coloredGutter + plainCode + padding, themeColors.diffRemoved)
-        // ANSI mode has no bg to mark the remove row, so dim the whole
-        // line instead — matches CC's `dimContent` (color-diff/
-        // index.ts:924). Without this, ANSI-mode `-` rows are visually
-        // indistinguishable from `+` rows.
-        if (isAnsiMode) row = c.dim(row)
-        styled = row
+        const plainCode = applyColor(fitted, DIFF_TEXT_FG)
+        const coloredGutter = c.hex(DIFF_REMOVED_FG)(gutter)
+        styled = c.bgHex(DIFF_REMOVED_BG)(coloredGutter + plainCode + padding)
       } else {
         // Context row: full syntax highlighting, no bg, gutter in
         // default fg (matches CC's addLineNumber path for marker===' ').
-        // defaultFg here keeps brightness consistent across context and
+        // DIFF_TEXT_FG here keeps brightness consistent across context and
         // +/- rows — CC paints all three from the same Theme.foreground.
-        const highlighted = highlightLine(fitted, lang, syntaxTheme, defaultFg)
+        const highlighted = highlightLine(fitted, lang, DIFF_TEXT_FG)
         styled = gutter + highlighted + padding
       }
       out.push(`${RESULT_INDENT}${styled}`)
@@ -282,12 +221,7 @@ function renderHunks(
  * noise without communicating any information (there's nothing to
  * compare against). Truncated tail collapses to `… +N lines`.
  */
-function renderCreatePreview(
-  filePath: string,
-  content: string,
-  terminalWidth: number,
-  theme?: SyntaxThemeName,
-): string[] {
+function renderCreatePreview(filePath: string, content: string, terminalWidth: number): string[] {
   const cols = Math.max(40, terminalWidth)
   const allLines = content.split('\n')
   // Drop a single trailing empty line — most file content ends with `\n`,
@@ -306,7 +240,7 @@ function renderCreatePreview(
   for (let i = 0; i < visible.length; i++) {
     const numStr = String(i + 1).padStart(lineNumWidth)
     const fitted = fitCode(visible[i] ?? '', codeWidth)
-    const highlighted = highlightLine(fitted, lang, theme)
+    const highlighted = highlightLine(fitted, lang)
     out.push(`${RESULT_INDENT}${c.gray(` ${numStr} `)}${highlighted}`)
   }
   if (truncated > 0) {
@@ -329,48 +263,12 @@ function renderCreatePreview(
  * Update payloads with no hunks (timed-out diff) collapse to the header
  * only — there's no patch to render.
  */
-/** Render a fixed JS snippet diff under the given UI theme — used by
- *  the `/theme` and first-run pickers to show a live color preview for
- *  the focused option. The hunk is hand-built (4 lines, 1 swap) rather
- *  than going through computeEditDiff so the picker doesn't drag in the
- *  diff library on the cold path.
- *
- *  The picker passes the candidate theme's name; we look up the
- *  theme's diff colors AND its associated syntax palette so the
- *  preview shows BOTH parts of the theme (bg + code colors) varying
- *  together — that's the whole point of the picker.
- *
- *  Drops the leading RESULT_INDENT from each row so the preview sits
- *  flush to the dialog's left margin (it's not nested under a tool
- *  bullet — it's a standalone block). */
-export function buildThemePreview(themeName: ThemeName, terminalWidth: number): string[] {
-  const theme = getThemeColors(themeName)
-  const payload: EditDiffPayload = {
-    filePath: 'preview.ts',
-    hunks: [
-      {
-        oldStart: 1,
-        oldLines: 3,
-        newStart: 1,
-        newLines: 3,
-        lines: [' function greet() {', '-  console.log("Hello, World!");', '+  console.log("Hello, tegent!");', ' }'],
-      },
-    ],
-    additions: 1,
-    removals: 1,
-    isCreate: false,
-  }
-  return renderHunks(payload, terminalWidth, theme.syntaxPalette, themeName).map((row) =>
-    row.startsWith(RESULT_INDENT) ? row.slice(RESULT_INDENT.length) : row,
-  )
-}
-
-export function renderEditDiff(payload: EditDiffPayload, terminalWidth: number, theme?: SyntaxThemeName): string[] {
+export function renderEditDiff(payload: EditDiffPayload, terminalWidth: number): string[] {
   const header = formatCounts(payload)
   if (payload.isCreate) {
     if (!payload.content) return [header]
-    return [header, ...renderCreatePreview(payload.filePath, payload.content, terminalWidth, theme)]
+    return [header, ...renderCreatePreview(payload.filePath, payload.content, terminalWidth)]
   }
   if (payload.hunks.length === 0) return [header]
-  return [header, ...renderHunks(payload, terminalWidth, theme)]
+  return [header, ...renderHunks(payload, terminalWidth)]
 }

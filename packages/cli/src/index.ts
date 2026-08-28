@@ -66,10 +66,6 @@ import { parseCliArgs } from './cli-args.js'
 import { runPluginCli } from './plugin-cli.js'
 //  导入启动时需要打印的提示和更新检查函数。
 import { checkForUpdate, printNoApiKeyMessage, printNoWebSearchKeyHint, printResumeHint } from './startup-prints.js'
-//  导入语法高亮主题设置函数。
-import { setSyntaxTheme } from './ui/syntax-highlight.js'
-//  导入主题解析、应用和取配色的函数。
-import { getThemeColors, parseThemeName, setTheme } from './ui/theme.js'
 
 ;(globalThis as { AI_SDK_LOG_WARNINGS?: unknown }).AI_SDK_LOG_WARNINGS = (options: {
   //  声明回调参数里的 warnings 字段：这里是一组未知结构的警告对象。
@@ -392,27 +388,6 @@ async function main() {
     )
     //  把当前模型 id 改成回退供应商的默认模型。
     modelId = fallback.defaultModel
-    //  结束当前代码块。
-  }
-
-  //  应用持久化的 UI 主题。要尽早做（在 startApp 之前），
-  // 这样第一行滚动历史——包括从恢复的会话里取出的含 edit/write 工具调用的消息——
-  // 就已经按用户选的主题上色（差异背景 + 语法高亮配色）。
-  // 未知值（过期配置、手工编辑的文件）会静默回退到默认主题。
-  // 选定的主题同时驱动两件事：diff 背景色（渲染时由 render-diff.ts 读取）
-  // 和语法高亮配色（在 syntax-highlight 模块上全局设置）。
-  //  开始一个独立代码块，用来限制临时变量作用域。
-  {
-    //  从用户配置读取主题名，并解析成内部认识的主题枚举。
-    const t = parseThemeName(loadUserConfig().theme)
-    //  如果主题名有效，就应用它；无效则保持默认主题。
-    if (t !== null) {
-      //  把 UI 主题设置为用户选择的主题。
-      setTheme(t)
-      //  把语法高亮配色同步成当前主题对应的配色。
-      setSyntaxTheme(getThemeColors(t).syntaxPalette)
-      //  结束当前代码块。
-    }
     //  结束当前代码块。
   }
 

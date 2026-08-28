@@ -13,7 +13,6 @@ import {
   getContextWindow,
   listSessions,
   loadSession,
-  // loadUserConfig,
   pickLatestSession,
   resolveModelId,
   saveUserConfig,
@@ -34,10 +33,7 @@ import { createMcpCommandHandler } from '../commands/mcp.js'
 import { createPluginCommandHandler } from '../commands/plugin.js'
 import { createSkillCommandHandler } from '../commands/skill.js'
 import { useAgent } from '../hooks/use-agent.js'
-// import { buildThemePreview } from '../render-diff.js'
-// import { setSyntaxTheme } from '../syntax-highlight.js'
 import { GLYPH_BULLET } from '../terminal-glyphs.js'
-// import { DEFAULT_THEME, THEMES, type ThemeName, getTheme, getThemeColors, parseThemeName, setTheme } from '../theme.js'
 import { parseBooleanArg } from '../utils.js'
 import { getHeaderRowCount } from './AppHeader.js'
 // import { ChatInput } from './ChatInput.js'
@@ -89,12 +85,6 @@ export const SLASH_COMMANDS = [
     description: 'Toggle extended thinking on/off (no-arg = show status) — saved',
     argumentHint: '[on|off]',
   },
-  // 本期聚焦 agent 能力，主题颜色属于锦上添花功能，暂不暴露 `/theme`。
-  // {
-  //   name: '/theme',
-  //   description: 'Pick UI theme (no-arg = interactive picker) — drives diff colors + syntax palette',
-  //   argumentHint: '[name]',
-  // },
   {
     name: '/plan',
     description: 'Toggle plan mode on/off (no-arg = show status) — saved',
@@ -654,76 +644,6 @@ export function App({
     [addInfoMessage, askQuestion, getCheckpoints, rewind],
   )
 
-  // /**
-  //  * 把 ThemeName 解析成面向用户展示的主题标签。
-  //  *
-  //  * @param name - 内部主题名。
-  //  * @returns 对应的显示标签；找不到时回退为原始主题名。
-  //  */
-  // function themeLabel(name: ThemeName): string {
-  //   return THEMES.find((t) => t.name === name)?.label ?? name
-  // }
-
-  // /**
-  //  * 应用主题：同时更新 UI 主题状态和该主题绑定的语法高亮调色板。
-  //  *
-  //  * 统一放在这里，是为了让 `/theme`、首次启动主题选择器、启动加载器保持一致；
-  //  * 否则很容易只改背景色或只改代码色，导致 diff 背景和代码高亮不匹配。
-  //  *
-  //  * @param name - 要应用的主题名。
-  //  */
-  // function applyTheme(name: ThemeName) {
-  //   setTheme(name)
-  //   setSyntaxTheme(getThemeColors(name).syntaxPalette)
-  // }
-
-  // /**
-  //  * 首次运行的主题 onboarding 选择器。
-  //  *
-  //  * 当 `config.json` 里没有 `theme` 字段时只触发一次，也就是全新用户首次交互式启动。
-  //  * 恢复会话、`--print` 和带初始 prompt 的启动都会跳过它，具体见下方启动流程 effect。
-  //  * 用户选择或关闭后都会持久化一个值，这样下次启动不会再次询问；
-  //  * 如果用户直接退出选择器，也视为“默认主题就行”。
-  //  */
-  // async function runFirstRunThemePicker() {
-  //   addInfoMessage(
-  //     [
-  //       '**Welcome to TEGENT!**',
-  //       '',
-  //       'Choose the theme that looks best with your terminal. You can change it any time with `/theme`.',
-  //     ].join('\n'),
-  //   )
-
-  //   const cols = Math.max(40, process.stdout.columns ?? 100)
-  //   // 给对话框左边距（1 格缩进）和预览内容缩进（2 格）预留空间。
-  //   // 预览 helper 会自己填充列宽，因此这里宽度预算略宽松是可以的。
-  //   const previewWidth = Math.max(40, cols - 4)
-  //   const choices = THEMES.map((t) => ({
-  //     name: t.name,
-  //     label: t.label,
-  //     description: t.description,
-  //     preview: buildThemePreview(t.name, previewWidth),
-  //   }))
-
-  //   const answer = await askQuestion(
-  //     'Pick a theme:',
-  //     choices.map((c) => ({ label: c.label, description: c.description, preview: c.preview })),
-  //   )
-
-  //   const picked = choices.find((c) => c.label === answer)
-  //   const parsedFree = parseThemeName(answer ?? '')
-  //   const resolved = picked ? picked.name : (parsedFree ?? DEFAULT_THEME)
-
-  //   applyTheme(resolved)
-  //   saveUserConfig({ theme: resolved })
-
-  //   if (picked || parsedFree !== null) {
-  //     addInfoMessage(`Theme set to **${themeLabel(resolved)}**. Type a message to get started.`)
-  //   } else {
-  //     addInfoMessage(`Using default theme **${themeLabel(resolved)}**. Run \`/theme\` any time to switch.`)
-  //   }
-  // }
-
   // 挂载时处理启动路径。CLI 入口会准备三条互斥路径：
   //   - initialSession 存在：`xc -c` 已经同步加载了最近会话。
   //     useAgent 已经把滚动历史恢复出来；这里只需要放一条 banner，
@@ -752,11 +672,6 @@ export function App({
       void handleResume()
       return
     }
-    // 本期先不做主题 onboarding：普通交互式启动直接进入 agent 输入体验。
-    // if (!initialPrompt && loadUserConfig().theme === undefined) {
-    //   void runFirstRunThemePicker()
-    //   return
-    // }
     if (initialPrompt) {
       void submit(initialPrompt)
     }
@@ -796,10 +711,6 @@ export function App({
         case 'thinking':
           handleThinkingToggle(text, arg)
           return
-
-        // case 'theme':
-        //   await handleThemeSwitch(text, arg)
-        //   return
 
         case 'plan':
           handlePlanToggle(text, arg)
@@ -1145,100 +1056,6 @@ export function App({
     }
     commitThinkingChange(commandText, next)
   }
-
-  // 主题颜色相关的 `/theme` 处理器本期先不启用，避免把精力分散到锦上添花的 UI 配置上。
-  //
-  // // themeLabel + applyTheme + runFirstRunThemePicker 位于启动 useEffect 之前，
-  // // 因为那个 effect 会触发首次运行主题选择器。`react-compiler` 会标记
-  // // `[]` deps effect 中的“先引用后声明”，所以这些 helper 被提升到前面。
-  // // /theme 的处理器（commitThemeChange、handleThemeSwitch）由常规 handleSubmit
-  // // 路径调用，对 hoisting 的要求更宽松，因此保留在其他 slash command handler 附近。
-  //
-  // /**
-  //  * 提交一次主题切换。
-  //  *
-  //  * 会同时切换当前 UI 主题和该主题绑定的语法高亮调色板，让下一次 diff 渲染
-  //  * 立刻使用新颜色；同时持久化到用户配置，并输出确认消息。
-  //  * agent loop / scrollback writer 不缓存颜色，所以无需重启。
-  //  *
-  //  * @param commandText - 用户输入的原始命令文本。
-  //  * @param name - 要切换到的主题名。
-  //  */
-  // function commitThemeChange(commandText: string, name: ThemeName) {
-  //   applyTheme(name)
-  //   saveUserConfig({ theme: name })
-  //   addCommandMessage(commandText, `Set theme to **${themeLabel(name)}**.`)
-  // }
-
-  // /**
-  //  * 处理 `/theme`：选择 UI 主题。
-  //  *
-  //  * 主题同时驱动 diff 背景色和对应的语法高亮调色板。
-  //  * 不带参数时打开交互式选择器，列出所有主题，用 `●` 标记当前主题，
-  //  * 并在用户上下移动时展示实时预览，体验对齐 `/model` 和 `/thinking`。
-  //  *
-  //  * 带 `<theme-name>` 时直接切换，接受 canonical kebab-case 名称
-  //  * （`dark`、`light`、`dark-daltonized`、`light-daltonized`、
-  //  * `dark-ansi`、`light-ansi`）以及 `parseThemeName` 支持的别名。
-  //  *
-  //  * 选择会持久化到 ~/.tegent/config.json，以便重启后保留。
-  //  *
-  //  * @param commandText - 用户输入的原始命令文本。
-  //  * @param arg - `/theme` 后面的参数。
-  //  */
-  // async function handleThemeSwitch(commandText: string, arg: string) {
-  //   const current = getTheme()
-
-  //   if (arg.trim()) {
-  //     const next = parseThemeName(arg)
-  //     if (next === null) {
-  //       const names = THEMES.map((t) => t.name).join(', ')
-  //       addCommandMessage(commandText, `Unknown theme: \`${arg}\`. Available: ${names}.`)
-  //       return
-  //     }
-  //     if (next === current) {
-  //       addCommandMessage(commandText, `Theme is already **${themeLabel(next)}** — no change.`)
-  //       return
-  //     }
-  //     commitThemeChange(commandText, next)
-  //     return
-  //   }
-
-  //   // 不带参数时打开交互式选择器。
-  //   // 展示所有主题，并用 `●` 标记当前主题。这里复用模型选择器的对话框组件，
-  //   // 另外加上会随方向键移动而重绘的实时预览区域。
-  //   const cols = Math.max(40, process.stdout.columns ?? 100)
-  //   const previewWidth = Math.max(40, cols - 4)
-  //   const choices = THEMES.map((t) => ({
-  //     name: t.name,
-  //     label: `${t.name === current ? `${GLYPH_BULLET} ` : '  '}${t.label}`,
-  //     description: t.description,
-  //     preview: buildThemePreview(t.name, previewWidth),
-  //   }))
-  //   const answer = await askQuestion(
-  //     `Current: **${themeLabel(current)}**. Choose the text style that looks best with your terminal (${GLYPH_BULLET} = current):`,
-  //     choices.map((c) => ({ label: c.label, description: c.description, preview: c.preview })),
-  //   )
-  //   const picked = choices.find((c) => c.label === answer)
-  //   if (!picked) {
-  //     const free = parseThemeName(answer ?? '')
-  //     if (free === null) {
-  //       addCommandMessage(commandText, `Cancelled — theme stays **${themeLabel(current)}**.`)
-  //       return
-  //     }
-  //     if (free === current) {
-  //       addCommandMessage(commandText, `Theme is already **${themeLabel(free)}** — no change.`)
-  //       return
-  //     }
-  //     commitThemeChange(commandText, free)
-  //     return
-  //   }
-  //   if (picked.name === current) {
-  //     addCommandMessage(commandText, `Theme is already **${themeLabel(current)}** — no change.`)
-  //     return
-  //   }
-  //   commitThemeChange(commandText, picked.name)
-  // }
 
   /**
    * 处理 `/plan`：切换 plan 模式。

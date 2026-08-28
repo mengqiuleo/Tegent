@@ -89,12 +89,6 @@ export function resolveModelId(input?: string): string | null {
 export interface UserConfig {
   model?: string
   thinking?: boolean
-  /** Persisted UI theme name. Drives both diff bg colors and the
-   *  associated syntax-highlight palette. Validated at load time by
-   *  `parseThemeName` in the CLI; the type stays loose `string` here
-   *  because core doesn't depend on the CLI's theme list. Unknown
-   *  values fall back to the default ('dark') silently. */
-  theme?: string
   /** MCP server declarations. Loose-typed here because the schema is
    *  validated in `mcp/config-schema.ts` — we don't want to drag a Zod
    *  type into the config module's surface. Loader uses
