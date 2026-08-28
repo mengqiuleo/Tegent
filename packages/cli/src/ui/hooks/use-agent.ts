@@ -341,8 +341,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
   }, [state.activeToolCalls.length])
 
   // 首次渲染后，把预加载会话 hydrate 成 core 的 LoopState。
-  // 这个 effect 会早于 App 里提交 initialPrompt 的 effect 执行，因此恢复会话后的第一条新消息
-  // 会带着 existingState 进入 agentLoop，继续写同一个会话，而不是新开一段。
+  // 这样恢复会话后的第一条新消息会带着 existingState 进入 agentLoop，
+  // 继续写同一个会话，而不是新开一段。
   useEffect(() => {
     if (initialSession && !loopStateRef.current) {
       loopStateRef.current = hydrateLoopState(initialSession, options.permissionMode ?? 'default')

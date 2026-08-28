@@ -41,7 +41,6 @@ import { ChatInput } from './ChatInputInk.js'
 interface AppProps {
   model: LanguageModel
   options: AgentOptions
-  initialPrompt?: string
   /**
    * `xc --continue` 预先加载好的会话。
    *
@@ -370,7 +369,6 @@ PR number: ${args}`
 export function App({
   model,
   options,
-  initialPrompt,
   initialSession,
   resumeIntent,
   onCleanupReady,
@@ -650,7 +648,7 @@ export function App({
   //     这条路径没有额外异步工作，只是视觉提示。
   //   - resumeIntent === 'pick'：`xc -r` 需要打开选择器。
   //     这里弹出和 `/resume` 相同的对话框。
-  //   - 都没有：普通启动，可选地自动提交 initialPrompt。
+  //   - 都没有：普通启动，无需额外处理。
   // askQuestion 只有在用户选择后才会 resolve，因此这里把它包在 effect 中并忽略 promise；
   // Ink 不关心 effect 内仍在等待的异步任务。
   useEffect(() => {
@@ -670,9 +668,6 @@ export function App({
     if (resumeIntent === 'pick') {
       void handleResume()
       return
-    }
-    if (initialPrompt) {
-      void submit(initialPrompt)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

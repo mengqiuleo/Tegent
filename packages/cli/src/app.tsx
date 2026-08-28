@@ -47,7 +47,6 @@ export interface StartAppOptions {
 export function startApp(
   model: LanguageModel,
   options: AgentOptions,
-  initialPrompt?: string,
   startOpts: StartAppOptions = {},
 ) {
   // Print header ONCE before Ink starts — avoids Static re-render duplication
@@ -57,7 +56,6 @@ export function startApp(
     <App
       model={model}
       options={options}
-      initialPrompt={initialPrompt}
       initialSession={startOpts.initialSession ?? null}
       resumeIntent={startOpts.resumeIntent ?? null}
       onCleanupReady={(fn) => {

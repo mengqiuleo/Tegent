@@ -1,123 +1,60 @@
-﻿// 这是 CLI（命令行界面）的入口文件。
-// 当用户在终端敲下 `xc` 命令时，程序就从这里的 main() 函数开始执行。
-// 这个文件负责：启动前的所有准备工作（检查环境、解析参数、加载插件/MCP、
-// 恢复会话等），然后挂载 Ink（TUI 框架）启动主界面，最后处理退出流程。
-//  从 chalk 引入 Chalk，用来创建一个按终端能力上色的输出工具。
-import { Chalk } from 'chalk'
+﻿import { Chalk } from 'chalk'
 
-//  引入 Node 内置 fs 模块，用来同步写终端转义序列、检查 .env 等文件。
 import fs from 'node:fs'
-//  引入 Node 内置 path 模块，用来拼接和向上查找目录路径。
 import path from 'node:path'
 
-//  开始从 core 包导入一组运行 CLI 需要的核心能力。
 import {
-  //  导入 MCP 权限存储类，用来记住 MCP 工具的允许策略。
   McpPermissionStore,
-  //  导入供应商检测顺序，用来在默认模型失效时找可用回退模型。
-  PROVIDER_DETECTION_ORDER,
-  //  导入插件整合函数，把插件贡献的技能、命令、MCP 等内容整理成统一结构。
+  PROVIDER_DETECTION_ORDER,  // 供应商检测顺序，用来在默认模型失效时找可用回退模型
   buildPluginIntegration,
-  //  导入斜杠命令注册表创建函数。
   createCommandRegistry,
-  //  导入模型注册表创建函数，用它把模型 id 解析成真实模型对象。
   createModelRegistry,
-  //  导入 MCP OAuth 供应商工厂，用来处理 MCP 授权流程。
   createOAuthProviderFactory,
-  //  导入技能注册表创建函数。
   createSkillRegistry,
-  //  导入子 agent 注册表创建函数。
   createSubAgentRegistry,
-  //  导入默认插件市场初始化函数，用于首次运行时补默认市场订阅。
   ensureDefaultMarketplaces,
-  //  导入可用供应商检测函数，用来判断哪些 API key 已配置。
   getAvailableProviders,
-  //  导入供应商到环境变量名的映射函数，用来给用户打印缺 key 的提示。
   getEnvVarName,
-  //  导入令牌存储获取函数，MCP OAuth 会把授权令牌放在这里。
   getTokenStorage,
-  //  导入插件加载函数，用来扫描并加载所有可用插件。
   loadAllPlugins,
-  //  导入 MCP 配置加载函数，用来从磁盘读取并启动 MCP 服务器。
   loadMcpFromDisk,
-  //  导入用户配置读取函数，用来取主题、thinking 开关等持久化配置。
   loadUserConfig,
-  //  导入模型 id 解析函数，用默认配置得到最终模型。
   resolveModelId,
 } from '@tegent/core'
-//  只导入 TypeScript 类型，编译成 JavaScript 时不会产生运行时代码。
+
 import type { AgentOptions, HookBus, McpRegistry } from '@tegent/core'
 
-//  从本地 app 模块导入清理函数获取器和启动 TUI 的函数。
 import { getCleanupFn, startApp } from './app.js'
-//  导入命令行参数解析函数。
 import { parseCliArgs } from './cli-args.js'
-//  导入启动时需要打印的提示和更新检查函数。
 import { checkForUpdate, printNoApiKeyMessage, printNoWebSearchKeyHint, printResumeHint } from './startup-prints.js'
 
-//  chalk 是一个给终端文字上色的库。
-// 这里根据 stderr 是否是真正的终端（TTY）决定颜色等级：
-// 是终端就用 24 位真彩色（level 3），否则不上色（level 0，比如输出被重定向到文件时）。
-//  创建 chalk 实例；stderr 是终端就启用真彩色，不是终端就关闭颜色。
 const chalk = new Chalk({ level: process.stderr.isTTY ? 3 : 0 })
 
-//  最低要求的 Node.js 版本：20.19.0
-//  保存项目要求的最低 Node.js 版本号，数组三项依次是主版本、次版本、补丁版本。
+
+// .env 文件加载依赖 Node 20.12 引入的内置 process.loadEnvFile 接口，20.19.0 以上的小版本在 ESM 模块解析等基础功能上更为稳定
 const MIN_NODE_VERSION = [20, 19, 0]
 
-//  检查当前 Node.js 版本是否满足最低要求，不满足就报错退出。
-//  定义 Node 版本检查函数；返回 void 表示它没有正常返回值。
 function checkNodeVersion(): void {
-  //  把当前 Node 版本字符串拆成三个数字：主版本、次版本、补丁版本。
   const [major, minor, patch] = process.versions.node.split('.').map((v) => parseInt(v, 10))
-  //  把最低要求版本也拆成三个数字，后面逐项比较。
   const [reqMajor, reqMinor, reqPatch] = MIN_NODE_VERSION
-  //  开始一个多行 if 条件，下面几行会共同组成判断条件。
+
   if (
-    //  比较主版本：当前主版本太低就不满足要求。
     major < reqMajor ||
-    //  主版本相同时比较次版本，次版本太低也不满足要求。
     (major === reqMajor && minor < reqMinor) ||
-    //  主版本和次版本都相同时再比较补丁版本。
     (major === reqMajor && minor === reqMinor && patch < reqPatch)
-    //  执行这一行 TypeScript 代码，继续完成当前启动或清理流程。
   ) {
-    //  开始向 stderr 打印错误或提示信息。
     console.error(
-      //  执行这一行 TypeScript 代码，继续完成当前启动或清理流程。
-      `Error: X-Code CLI requires Node.js >= ${MIN_NODE_VERSION.join('.')}, but you are running ${process.versions.node}.\n` +
-        //  拼出提示用户升级 Node.js 的第二行英文信息。
+      `Error: TEGENT requires Node.js >= ${MIN_NODE_VERSION.join('.')}, but you are running ${process.versions.node}.\n` +
         'Please upgrade Node.js: https://nodejs.org/',
-      //  结束当前多行函数调用。
     )
-    //  用退出码 1 结束进程，表示发生了错误。
     process.exit(1)
-    //  结束当前代码块。
   }
-  //  结束当前代码块。
 }
 
-// 优雅退出（graceful shutdown）相关代码。
-// 单次 Ctrl+C 的退出路径：
-// 会话保存以「即发即忘」（fire-and-forget，不等待它完成）方式运行，所以不会阻塞退出。
-// 退出时不打印 token 用量统计——我们对比过的另外四款 CLI
-// （claude-code、codex、gemini-cli、opencode）都不打印，而且延迟刷新的 stdout
-// 会让统计信息出现在 shell 提示符之后，让用户困惑。
 
-//  标记退出流程是否已经开始，防止重复执行。
-//  声明退出状态标记，false 表示当前还没有进入退出流程。
-let shutdownInProgress = false
-//  启动时捕获的 MCP 注册表，用于在退出时关闭 MCP 服务器
-// （杀掉 stdio 子进程、终止 HTTP 传输）。如果不显式关闭，stdio 服务器
-// 会一直残留，直到它们发现父进程的 stdin 关闭——通常没问题，
-// 但显式关闭更快、也更不容易出意外。
-//  声明退出时要用的 MCP 注册表引用，初始为 null 表示还没加载。
-let mcpRegistryForShutdown: McpRegistry | null = null
-//  启动时捕获的插件钩子总线（hook bus），用于在退出前
-// 向插件钩子触发 `SessionEnd`（会话结束）事件。同样「即发即忘」——
-// 退出时只有 1 秒的宽限窗口，慢的钩子之后会被直接杀掉。
-//  声明退出时要用的插件钩子总线引用，初始为 null 表示还没准备好。
-let hookBusForShutdown: HookBus | null = null
+let shutdownInProgress = false //  声明退出状态标记，false 表示当前还没有进入退出流程。
+let mcpRegistryForShutdown: McpRegistry | null = null // 声明退出时要用的 MCP 注册表引用，初始为 null 表示还没加载。
+let hookBusForShutdown: HookBus | null = null // 声明退出时要用的插件钩子总线引用，初始为 null 表示还没准备好。
 
 //  「双保险」式的终端状态恢复。在退出前同步执行，
 // 这样即使 Ink 的卸载过程部分失败（比如某个 useEffect 清理函数抛错、
@@ -150,9 +87,7 @@ function resetTerminal(): void {
     //  开始 catch 块；如果恢复终端失败，就在这里吞掉异常。
   } catch {
     // 终端可能已经关闭（SIGHUP 信号、SSH 断开），忽略即可。
-    //  结束当前代码块。
   }
-  //  结束当前代码块。
 }
 
 //  优雅退出函数：尽可能做清理工作，然后退出进程。
@@ -185,7 +120,6 @@ async function gracefulShutdown(exitCode: number): Promise<never> {
   if (mcpRegistryForShutdown) {
     //  触发 MCP 注册表关闭流程，并吞掉关闭失败。
     mcpRegistryForShutdown.shutdown().catch(() => undefined)
-    //  结束当前代码块。
   }
 
   //  插件 SessionEnd（会话结束）钩子。即发即忘——不 await，
@@ -195,7 +129,6 @@ async function gracefulShutdown(exitCode: number): Promise<never> {
   if (hookBusForShutdown?.has('SessionEnd')) {
     //  发送 SessionEnd 事件，把当前工作目录和模型信息传给插件钩子。
     hookBusForShutdown.emit({ name: 'SessionEnd', session: { cwd: process.cwd(), modelId: '' } }).catch(() => undefined)
-    //  结束当前代码块。
   }
 
   //  先恢复终端状态。
@@ -230,23 +163,9 @@ async function main() {
   //  后台启动版本更新检查；void 表示故意不等待这个 Promise。
   void checkForUpdate().catch(() => undefined)
 
-  //  解析命令行参数（yargs），argv 里包含 model、resume 等
-  //  解析普通 CLI 参数，得到结构化的 argv 对象。
-  const argv = await parseCliArgs()
-
-  //  把位置参数（比如 `xc 帮我写个函数` 里的「帮我写个函数」）拼成提示词
-  //  把所有位置参数用空格拼成用户提示词；没有内容就设为 undefined。
-  const prompt = (argv._ as string[]).join(' ') || undefined
-
-  //  检查是否有通过管道传入的 stdin 输入（比如 `cat file.txt | xc 总结一下`）
-  //  准备保存管道传入的 stdin 文本，默认是空字符串。
-  let stdinContent = ''
-  //  如果 stdin 不是终端，说明可能有管道输入，需要读取它。
-  if (!process.stdin.isTTY) {
-    //  读取 stdin 的全部文本，供后面和命令行提示词合并。
-    stdinContent = await readStdin()
-    //  结束当前代码块。
-  }
+  // 解析命令行参数（yargs）。CLI 没有配置类 flag，这里只为处理
+  // --version / --help；多余的位置参数会被忽略。
+  await parseCliArgs()
 
   //  获取当前配置了 API Key 的所有模型供应商列表
   //  检测当前环境变量里哪些模型供应商已经可用。
@@ -488,10 +407,6 @@ async function main() {
   //  会话恢复不通过命令行参数入口——要继续历史会话，
   // 进入交互模式后用 /resume 斜杠命令打开选择器。
 
-  //  把 stdin 内容和命令行提示词合并成完整提示词（用空行分隔）
-  //  把管道输入和命令行提示词过滤掉空值后，用两个换行合成完整提示词。
-  const fullPrompt = [stdinContent, prompt].filter(Boolean).join('\n\n')
-
   //  提醒：WebSearch（联网搜索）需要 API key。
   // 在 Ink 接管之前打印一次，让提示落在 TUI 上方的滚动历史里。
   // 这不是致命错误——WebFetch（抓取网页）无需 key 也能工作，
@@ -504,9 +419,9 @@ async function main() {
   }
 
   //  启动主应用（挂载 Ink TUI）。waitUntilExit 在 Ink 卸载时 resolve（包括 Ctrl+C 触发的卸载）。
-  // startApp 接收：模型、选项、初始提示词。要恢复历史会话，进入 TUI 后用 /resume 选择。
+  // 要恢复历史会话，进入 TUI 后用 /resume 选择。
   //  启动 Ink TUI，并拿到一个会在应用退出时完成的 Promise。
-  const waitUntilExit = startApp(model, options, fullPrompt || undefined)
+  const waitUntilExit = startApp(model, options)
   //  等待 TUI 卸载；用户退出或 Ctrl+C 都会走到这里。
   await waitUntilExit()
 
@@ -619,60 +534,6 @@ async function askInTerminal(
     rl.close()
     //  结束当前代码块。
   }
-  //  结束当前代码块。
-}
-
-//  读取 stdin 的全部内容（用于管道输入场景，比如 `cat file | xc 总结`）。
-// 带一个 1 秒超时，避免永远挂起。
-//  定义读取 stdin 的函数，返回一个会解析成字符串的 Promise。
-function readStdin(): Promise<string> {
-  //  手动创建 Promise，因为 stdin 是事件驱动的数据流。
-  return new Promise((resolve) => {
-    //  准备累积收到的 stdin 文本。
-    let data = ''
-    //  把 stdin 数据解码方式设为 UTF-8 字符串。
-    process.stdin.setEncoding('utf-8')
-
-    //  定义 data 事件处理函数，每来一段文本就追加到 data。
-    const onData = (chunk: string): void => {
-      //  把当前收到的文本片段追加到总内容里。
-      data += chunk
-      //  结束当前代码块。
-    }
-    //  定义 end 事件处理函数，stdin 结束时清理并返回完整内容。
-    const onEnd = (): void => {
-      //  调用清理函数，移除监听器并清掉超时器。
-      cleanup()
-      //  把累积到的 stdin 内容作为 Promise 结果交出去。
-      resolve(data)
-      //  结束当前代码块。
-    }
-    //  定义清理函数，避免监听器和定时器残留。
-    const cleanup = (): void => {
-      //  移除 data 事件监听器。
-      process.stdin.off('data', onData)
-      //  移除 end 事件监听器。
-      process.stdin.off('end', onEnd)
-      //  清除读取 stdin 的兜底超时器。
-      clearTimeout(timer)
-      //  结束当前代码块。
-    }
-
-    //  注册 data 事件监听器，开始接收 stdin 数据。
-    process.stdin.on('data', onData)
-    //  注册 end 事件监听器，stdin 完成时收尾。
-    process.stdin.on('end', onEnd)
-    //  stdin 超时——别永远挂着
-    //  设置 1 秒超时；如果 stdin 不结束，也会按已有内容继续启动。
-    const timer = setTimeout(() => {
-      //  调用清理函数，移除监听器并清掉超时器。
-      cleanup()
-      //  把累积到的 stdin 内容作为 Promise 结果交出去。
-      resolve(data)
-      //  结束超时回调，并把等待时间设为 1000 毫秒。
-    }, 1000)
-    //  结束当前函数调用或回调表达式。
-  })
   //  结束当前代码块。
 }
 

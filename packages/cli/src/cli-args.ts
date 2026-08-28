@@ -2,8 +2,8 @@
 // 这个文件从入口文件中拆出来，是为了让参数解析逻辑不把 index.ts 里的
 // 启动编排逻辑挤得太长。CLI 不提供任何配置类 flag——模型、plan 模式、
 // 插件、会话恢复等全部在进入交互模式后，通过 /model、/plan、/plugin、
-// /resume 等斜杠命令自行配置。这里只保留位置参数（初始提示词）和
-// --version / --help 两个标准入口。
+// /resume 等斜杠命令自行配置。这里只保留 --version / --help 两个标准
+// 入口；多余的位置参数会被直接忽略。
 import yargs from 'yargs' // 引入 yargs，用于声明和解析命令行参数。
 import { hideBin } from 'yargs/helpers' // 引入 hideBin，用于去掉 node 路径和脚本路径这两个前置参数。
 
@@ -14,7 +14,7 @@ import { VERSION } from './version.js' // 引入当前 CLI 版本号，用于 `-
  *
  * 该函数不注册任何配置选项；启动时的行为完全由用户配置文件
  * （~/.tegent/config.json）和环境变量决定，其余配置都在进入交互模式后
- * 用斜杠命令完成。返回值由 yargs 推断，调用方主要读取 `_`（位置参数）。
+ * 用斜杠命令完成。解析只为让 yargs 处理 --version / --help。
  *
  * @returns yargs 解析后的命令行参数对象。
  */
@@ -23,8 +23,8 @@ export async function parseCliArgs() {
   return yargs(hideBin(process.argv))
     // 设置帮助信息里显示的命令名。
     .scriptName('tegent')
-    // 设置命令用法，其中 [prompt] 表示可以直接跟一段初始提示词。
-    .usage('$0 [prompt]')
+    // 设置命令用法；CLI 不接收任何位置参数。
+    .usage('$0')
     // 注册 `--version` 输出，内容来自当前包版本。
     .version(VERSION)
     // 给 `--version` 增加短别名 -v。
