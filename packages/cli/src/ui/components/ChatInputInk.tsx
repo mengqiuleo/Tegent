@@ -1,8 +1,8 @@
 // 已实现功能：slash 补全、输入历史、权限弹窗、SelectOptions、Esc 中断、
 // Ctrl+C 中断、普通文本输入、普通粘贴、Enter 提交、Backspace 删除、
 // Delete 删除、左右移动光标、Home/End 跳转、上下移动光标、PageUp/PageDown 跳转。
-// 未实现功能：@ 文件补全、大段粘贴折叠成引用、Alt+Enter 换行、
-// Ctrl+Enter 换行、粘贴引用占位符删除、@ 补全菜单关闭记忆。
+// 未实现功能：大段粘贴折叠成引用、Alt+Enter 换行、
+// Ctrl+Enter 换行、粘贴引用占位符删除。
 // 区别只在渲染策略：这里用 Ink 的 <Box>/<Text> 直接渲染，不再使用原版的
 // cell-level diff + process.stdout.write 精细绘制。
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -12,35 +12,21 @@ import { Box, Text, useInput, useStdout } from 'ink'
 import { suggestRuleLabel } from '@tegent/core'
 import type { DisplayMessage, DisplayToolCall, TodoItem } from '@tegent/core'
 
-// @ 文件补全本期先不接入；保留这行注释，后续恢复时可直接打开相关工具函数。
-// import { applyCompletion, detectAtToken, scoreAndRank } from '../file-completion.js'
-import type { FileEntry } from '../file-completion.js'
 import type { ActiveToolCall } from '../hooks/use-agent.js'
-// @ 文件补全本期先不扫描工作区；恢复 @ 补全时再打开 useFileCompletion。
-// import { useFileCompletion } from '../hooks/use-file-completion.js'
 // 本期使用 Ink useInput；后续如果要恢复 bracketed paste 和跨终端输入兼容，再接回 usePromptInput。
 // import { usePromptInput } from '../hooks/use-prompt-input.js'
 import { HISTORY_MAX, appendInputHistory, loadInputHistory } from '../input-history.js'
 import type { InputHistoryEntry } from '../input-history.js'
-// 大段粘贴折叠成引用本期先不做；恢复该功能时再打开这些 helper。
-// import { expandPasteRefs, formatPasteRef, stripTrailingRef } from '../paste-refs.js'
-import type { PastedContents } from '../paste-refs.js'
 import { formatTokenCount, getToolInputPreview, getToolLabel } from '../utils.js'
 import { inputReducer } from './chat-input/reducer.js'
 import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 
 // export type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 
-// 大段粘贴折叠成引用的行数阈值，本期关闭该功能，所以常量保留在注释中。
-// const PASTE_REF_MIN_LINES = 3
-// 大段粘贴折叠成引用的字符数阈值，本期关闭该功能，所以常量保留在注释中。
-// const PASTE_REF_MIN_CHARS = 400
 /** Ink 动态区最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
 const MAX_VISIBLE_MESSAGES = 30
 /** slash command 菜单最多展示的候选数量，超过后只显示前 N 项。 */
 const MAX_VISIBLE_MENU_ITEMS = 8
-// @ 文件补全最多展示的候选数量，本期关闭该功能，所以常量保留在注释中。
-// const MAX_AT_RESULTS = 50
 /** PageUp/PageDown 每次让光标跨越的逻辑行数。 */
 const MAX_VERTICAL_CURSOR_JUMP = 10
 /** 双击 Esc 清空输入框的最大间隔，单位毫秒。 */
@@ -409,45 +395,30 @@ function SelectDialog({
 }
 
 /**
- * 渲染 slash command 或 @ 文件补全菜单。
+ * 渲染 slash command 补全菜单。
  *
- * @param props.kind 菜单类型。
  * @param props.commandMatches slash 命令候选。
- * @param props.atMatches @ 文件候选。
  * @param props.selected 当前选中下标。
  * @returns Ink 菜单。
  */
 function CompletionMenu({
-  kind,
   commandMatches,
-  atMatches,
   selected,
 }: {
-  kind: 'slash' | 'at'
   commandMatches: readonly CommandMatch[]
-  atMatches: readonly FileEntry[]
   selected: number
 }) {
-  // 先把 slash/@ 两种候选统一成菜单行结构，下面渲染逻辑就不需要关心来源。
-  const rows =
-    kind === 'slash'
-      ? commandMatches.map((cmd) => ({
-          // key 用最终写回文本，保证同名不同层级候选也能区分。
-          key: cmd.applyText,
-          // title 是菜单左侧主文本。
-          title: cmd.name,
-          // suffix 放参数提示；没有参数提示时为空。
-          suffix: cmd.argumentHint ?? '',
-          // description 是菜单右侧说明。
-          description: cmd.description,
-        }))
-      : atMatches.map((entry) => ({
-          // @ 补全本期关闭；这里保留原菜单行格式，后续恢复时可直接使用。
-          key: entry.relPath,
-          title: entry.relPath + (entry.isDirectory ? '/' : ''),
-          suffix: '',
-          description: entry.isDirectory ? 'directory' : 'file',
-        }))
+  // 先把候选统一成菜单行结构，下面渲染逻辑就不需要关心来源。
+  const rows = commandMatches.map((cmd) => ({
+    // key 用最终写回文本，保证同名不同层级候选也能区分。
+    key: cmd.applyText,
+    // title 是菜单左侧主文本。
+    title: cmd.name,
+    // suffix 放参数提示；没有参数提示时为空。
+    suffix: cmd.argumentHint ?? '',
+    // description 是菜单右侧说明。
+    description: cmd.description,
+  }))
 
   // 没有候选时不渲染菜单。
   if (rows.length === 0) return null
@@ -545,18 +516,8 @@ export function ChatInput({
     cursorRef.current = cursor
   }, [cursor])
 
-  // 大段粘贴折叠成引用本期先不做；保留空 pastedContents 只是为了输入历史类型兼容。
-  // pastedContents 的 key 是 paste id，value 是原始粘贴内容；当前第一版始终保持空对象。
-  const [pastedContents, setPastedContents] = useState<PastedContents>({})
-  // const nextPasteIdRef = useRef(1)
-
-  // slash command 维护选中下标；@ 文件补全本期先不做。
   // completionIndex 记录 slash 补全菜单当前高亮第几项。
   const [completionIndex, setCompletionIndex] = useState(0)
-  // @ 补全关闭后不读取 state 值，只保留 setter，方便重置逻辑和未来恢复代码保持形状。
-  const [, setAtCompletionIndex] = useState(0)
-  // const [atDismissed, setAtDismissed] = useState<string | null>(null)
-  // const { entries: fileEntries } = useFileCompletion()
 
   // 弹窗本地状态：权限选项、选择器选项、Other 自由输入。
   // permissionSelected 表示权限弹窗当前高亮 Yes/Always/No 的哪一项。
@@ -578,7 +539,7 @@ export function ChatInput({
   // historyIndexRef 表示当前正在查看倒数第几条历史；0 表示没有进入历史导航。
   const historyIndexRef = useRef(0)
   // historyDraftRef 保存用户开始翻历史前的草稿，Down 回到最新位置时恢复它。
-  const historyDraftRef = useRef<{ text: string; cursor: number; pasted: PastedContents } | null>(null)
+  const historyDraftRef = useRef<{ text: string; cursor: number } | null>(null)
   // initialCwdRef 固定启动时 cwd，历史文件始终写入同一个项目目录。
   const initialCwdRef = useRef(process.cwd())
 
@@ -649,30 +610,12 @@ export function ChatInput({
     }))
   })()
 
-  // /**
-  //   @ 文件补全触发器和候选。
-  //  *
-  //  * `detectAtToken` 保持和 core 的文件引用解析规则一致，避免 UI 提示一个后端不认的路径。
-  //  */
-  // const atTrigger = useMemo(() => detectAtToken(text, cursor), [text, cursor])
-  // const atMatches = useMemo(() => {
-  //   if (!atTrigger.active) return [] as FileEntry[]
-  //   return scoreAndRank(fileEntries as FileEntry[], atTrigger.query).slice(0, MAX_AT_RESULTS)
-  // }, [atTrigger, fileEntries])
-  // const safeAtIndex = atMatches.length > 0 ? atCompletionIndex % atMatches.length : 0
-
-  const atMatches: FileEntry[] = [] // @ 文件补全本期关闭；这里保留空数组是为了让 CompletionMenu 的 props 形状不变。
-  // @ 文件补全开启时，这里会保存取模后的安全选中下标，避免候选数量变化后下标越界。
-  // const safeAtIndex = 0
   // slash 补全当前选中项的安全下标；候选数量变化时用取模把 completionIndex 拉回有效范围。
   const safeCommandIndex = matches.length > 0 ? completionIndex % matches.length : 0
   // 当前选中的 slash 命令候选；没有候选时为 null，Enter/Tab 就不会接受补全。
   const currentMatch = matches.length > 0 ? matches[safeCommandIndex] : null
-  // const atDismissedKey = `${atTrigger.atIdx}:${atTrigger.query}`
-  // 当前显示的补全菜单类型；本期只允许 slash 菜单，@ 菜单逻辑保留在注释里。
-  const activeMenu: 'slash' | 'at' | null = matches.length > 0 ? 'slash' : null
-  // const activeMenu: 'slash' | 'at' | null =
-  //   matches.length > 0 ? 'slash' : atTrigger.active && atDismissed !== atDismissedKey ? 'at' : null
+  // 补全菜单是否打开；当前只有 slash 菜单。
+  const menuOpen = matches.length > 0
 
   // 启动时读取项目本地输入历史；失败静默吞掉，历史不是核心功能。
   useEffect(() => {
@@ -720,17 +663,16 @@ export function ChatInput({
   /**
    * 把一次成功提交写入内存历史和磁盘历史。
    *
-   * @param raw 输入框里的原始文本，保留粘贴引用占位符。
-   * @param pasted 当前粘贴引用内容表。
+   * @param raw 输入框里的原始文本。
    */
-  const pushHistory = (raw: string, pasted: PastedContents) => {
+  const pushHistory = (raw: string) => {
     // 空白输入不写历史。
     if (!raw.trim()) return
     // 连续提交同一条输入时不重复写历史。
     const last = historyRef.current[historyRef.current.length - 1]
     if (last && last.text === raw) return
-    // 历史条目保存原始文本、粘贴引用内容和时间戳。
-    const entry: InputHistoryEntry = { text: raw, pasted: { ...pasted }, ts: Date.now() }
+    // 历史条目保存原始文本和时间戳。
+    const entry: InputHistoryEntry = { text: raw, ts: Date.now() }
     // 先写入内存历史，Up/Down 立即可用。
     historyRef.current.push(entry)
     // 内存中只保留最近 HISTORY_MAX 条；磁盘文件不在这里裁剪。
@@ -745,14 +687,11 @@ export function ChatInput({
    * @param entry 历史条目。
    * @param cursorAt 恢复后光标放在开头还是结尾。
    */
-  const restoreHistoryEntry = (entry: { text: string; pasted: PastedContents }, cursorAt: 'start' | 'end') => {
+  const restoreHistoryEntry = (entry: { text: string }, cursorAt: 'start' | 'end') => {
     // 恢复历史文本，并按调用方要求把光标放在开头或结尾。
     dispatch({ type: 'SET_TEXT', text: entry.text, cursor: cursorAt === 'start' ? 0 : entry.text.length })
-    // 大段粘贴引用本期关闭；这里仍恢复 pasted map，保持历史数据结构兼容。
-    setPastedContents({ ...entry.pasted })
     // 恢复历史后重置补全菜单选中项。
     setCompletionIndex(0)
-    setAtCompletionIndex(0)
   }
 
   /**
@@ -765,7 +704,7 @@ export function ChatInput({
     if (historyIndexRef.current >= historyRef.current.length) return
     if (historyIndexRef.current === 0) {
       // 第一次进入历史浏览时，保存当前草稿，方便 Down 回来。
-      historyDraftRef.current = { text, cursor: cursorRef.current, pasted: { ...pastedContents } }
+      historyDraftRef.current = { text, cursor: cursorRef.current }
     }
     // index 表示“从最后一条开始往前数第几条”。
     historyIndexRef.current += 1
@@ -790,14 +729,11 @@ export function ChatInput({
       if (draft) {
         // 有草稿时恢复草稿文本和光标。
         dispatch({ type: 'SET_TEXT', text: draft.text, cursor: draft.cursor })
-        setPastedContents({ ...draft.pasted })
       } else {
         // 没有草稿时清空输入框。
         dispatch({ type: 'RESET' })
-        setPastedContents({})
       }
       setCompletionIndex(0)
-      setAtCompletionIndex(0)
       return
     }
     // 仍在历史浏览中时，显示下一条更新的历史，并把光标放在结尾。
@@ -856,39 +792,14 @@ export function ChatInput({
     if (!raw.trim()) return
     // spinner 存在说明 agent 正在跑，避免重复提交。
     if (spinner) return
-    // const expanded = override ? raw : expandPasteRefs(raw, pastedContents)
-    // 本期不展开粘贴引用，直接提交当前文本。
-    const expanded = raw
-    // pushHistory(override ? raw : text, override ? {} : pastedContents)
-    // 本期没有 paste ref，历史里的 pasted map 写空对象。
-    pushHistory(override ? raw : text, {})
+    pushHistory(raw)
     // 提交后退出历史浏览状态。
     resetHistoryNav()
     // 把文本交给 App，由 App 决定是 slash command 还是 agent submit。
-    onSubmit(expanded)
+    onSubmit(raw)
     // 提交后清空输入框和本地临时状态。
     dispatch({ type: 'RESET' })
-    setPastedContents({})
     setCompletionIndex(0)
-    setAtCompletionIndex(0)
-  }
-
-  /**
-   * 接受当前 @ 文件补全项。
-   *
-   * @returns 成功应用补全时返回 true。
-   */
-  const _acceptAtCompletion = (): boolean => {
-    // @ 文件补全本期关闭，所以这个函数固定返回 false。
-    // 保留函数是为了把恢复点留在原来调用位置附近。
-    // if (atMatches.length === 0) return false
-    // const picked = atMatches[safeAtIndex]
-    // if (!picked) return false
-    // const out = applyCompletion(text, atTrigger.atIdx, atTrigger.tokenEnd, picked)
-    // dispatch({ type: 'SET_TEXT', text: out.text, cursor: out.cursor })
-    // setAtCompletionIndex(0)
-    // return true
-    return false
   }
 
   /**
@@ -1030,7 +941,6 @@ export function ChatInput({
     dispatch({ type: 'INSERT', pos: cursorRef.current, chunk })
     // 输入改变后把补全菜单选择重置到第一项。
     setCompletionIndex(0)
-    setAtCompletionIndex(0)
   }
 
   // 直接使用 Ink 的 useInput。本期不做 bracketed paste、自定义 debounce、Alt+Enter/Ctrl+Enter 编码兼容。
@@ -1058,7 +968,6 @@ export function ChatInput({
         // 弹窗优先消费 Enter，避免主输入框误提交。
         if (handlePermissionKey('return')) return
         if (handleSelectKey('return')) return
-        // if (activeMenu === 'at' && acceptAtCompletion()) return
         // 有 slash 补全候选时，Enter 直接提交候选命令。
         if (currentMatch) {
           submitInput(currentMatch.applyText)
@@ -1086,14 +995,12 @@ export function ChatInput({
           return
         }
         // 输入框为空时 Esc 不做事。
-        if (text.length === 0 && Object.keys(pastedContents).length === 0) return
+        if (text.length === 0) return
         // 双击 Esc 清空输入；单击 Esc 只记录时间，避免误清。
         const now = Date.now()
         if (now - lastEscapeAtRef.current <= DOUBLE_ESC_WINDOW_MS) {
           dispatch({ type: 'RESET' })
-          setPastedContents({})
           setCompletionIndex(0)
-          setAtCompletionIndex(0)
           resetHistoryNav()
           lastEscapeAtRef.current = 0
         } else {
@@ -1162,7 +1069,6 @@ export function ChatInput({
       }
 
       if (key.tab) {
-        // if (activeMenu === 'at' && acceptAtCompletion()) return
         // Tab 接受 slash 补全，但不提交，只把候选写回输入框。
         if (currentMatch) {
           dispatch({ type: 'SET_TEXT', text: currentMatch.applyText, cursor: currentMatch.applyText.length })
@@ -1177,11 +1083,7 @@ export function ChatInput({
         if (handleSelectKey('up')) return
         // inHistoryNav 用来判断当前是否正在浏览历史；浏览历史时 slash 菜单不抢单项上下键。
         const inHistoryNav = historyIndexRef.current > 0
-        // if (activeMenu === 'at' && atMatches.length > 0 && (!inHistoryNav || atMatches.length > 1)) {
-        //   setAtCompletionIndex((idx) => (idx - 1 + atMatches.length) % atMatches.length)
-        //   return
-        // }
-        if (activeMenu === 'slash' && matches.length > 0 && (!inHistoryNav || matches.length > 1)) {
+        if (menuOpen && (!inHistoryNav || matches.length > 1)) {
           // slash 菜单打开时，上键移动菜单选中项。
           setCompletionIndex((idx) => (idx - 1 + matches.length) % matches.length)
           return
@@ -1197,11 +1099,7 @@ export function ChatInput({
         if (handleSelectKey('down')) return
         // inHistoryNav 用来判断当前是否正在浏览历史；浏览历史时 slash 菜单不抢单项上下键。
         const inHistoryNav = historyIndexRef.current > 0
-        // if (activeMenu === 'at' && atMatches.length > 0 && (!inHistoryNav || atMatches.length > 1)) {
-        //   setAtCompletionIndex((idx) => (idx + 1) % atMatches.length)
-        //   return
-        // }
-        if (activeMenu === 'slash' && matches.length > 0 && (!inHistoryNav || matches.length > 1)) {
+        if (menuOpen && (!inHistoryNav || matches.length > 1)) {
           // slash 菜单打开时，下键移动菜单选中项。
           setCompletionIndex((idx) => (idx + 1) % matches.length)
           return
@@ -1232,7 +1130,6 @@ export function ChatInput({
   if (hidden) return null
 
   const menuSelected = safeCommandIndex
-  // const menuSelected = activeMenu === 'at' ? safeAtIndex : safeCommandIndex
 
   return (
     <Box flexDirection="column">
@@ -1263,9 +1160,9 @@ export function ChatInput({
       {permission ? <PermissionDialog permission={permission} selected={permissionSelected} /> : null}
       {selectRequest ? <SelectDialog request={selectRequest} selected={selectIndex} freeform={freeform} /> : null}
 
-      {/* 补全菜单只在没有弹窗时显示；本期 activeMenu 只会是 slash。 */}
-      {activeMenu && !permission && !selectRequest ? (
-        <CompletionMenu kind={activeMenu} commandMatches={matches} atMatches={atMatches} selected={menuSelected} />
+      {/* slash 补全菜单只在没有弹窗时显示。 */}
+      {menuOpen && !permission && !selectRequest ? (
+        <CompletionMenu commandMatches={matches} selected={menuSelected} />
       ) : null}
 
       {/* 主输入框：光标前文本、反色光标字符、光标后文本分三段渲染。 */}

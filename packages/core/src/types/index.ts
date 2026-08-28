@@ -167,17 +167,15 @@ export interface AgentCallbacks {
 
 // ---- Agent 启动/运行选项 ----
 
-// agentLoop 的外部配置。CLI、子代理、print 模式都会通过这里注入能力。
+// agentLoop 的外部配置。CLI、子代理都会通过这里注入能力。
 export interface AgentOptions {
   // 当前使用的模型 ID，格式通常是 `<provider>:<model>`。
   modelId: string
   // 信任模式。开启后会减少某些权限询问，但仍受工具自身分类约束。
   trustMode: boolean
   // 单次 agentLoop 调用内最多迭代多少轮。
-  // 交互式会话通常不设上限；子代理和 --print 模式会传入限制。
+  // 交互式会话通常不设上限；子代理会传入限制。
   maxTurns?: number
-  // 是否为无交互打印模式。
-  printMode: boolean
   // 是否启用 provider 支持的最高 reasoning/thinking 强度。
   // 由 ~/.tegent/config.json 的 thinking 字段持久化，也可用 /thinking on|off 切换。
   thinking?: boolean

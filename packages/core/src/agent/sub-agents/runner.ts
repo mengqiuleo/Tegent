@@ -214,7 +214,6 @@ export async function runSubAgent(args: RunSubAgentArgs, parentModel: LanguageMo
     toolFilter,
     abortSignal: parentOptions.abortSignal,
     permissionMode: 'default',
-    printMode: false,
     // 子代理不再拿 subAgentRegistry：明确禁止递归调用 task。
     subAgentRegistry: undefined,
   }

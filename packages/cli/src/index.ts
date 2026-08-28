@@ -4,8 +4,6 @@
 // 恢复会话等），然后挂载 Ink（TUI 框架）启动主界面，最后处理退出流程。
 //  从 chalk 引入 Chalk，用来创建一个按终端能力上色的输出工具。
 import { Chalk } from 'chalk'
-//  从 yargs/helpers 引入 hideBin，用来去掉 node 和脚本路径，只保留用户传给 CLI 的参数。
-import { hideBin } from 'yargs/helpers'
 
 //  引入 Node 内置 fs 模块，用来同步写终端转义序列、检查 .env 等文件。
 import fs from 'node:fs'
@@ -30,8 +28,6 @@ import {
   createSkillRegistry,
   //  导入子 agent 注册表创建函数。
   createSubAgentRegistry,
-  //  导入空钩子总线，用于 --no-hooks 时让生命周期事件变成空操作。
-  emptyHookBus,
   //  导入默认插件市场初始化函数，用于首次运行时补默认市场订阅。
   ensureDefaultMarketplaces,
   //  导入可用供应商检测函数，用来判断哪些 API key 已配置。
@@ -40,49 +36,24 @@ import {
   getEnvVarName,
   //  导入令牌存储获取函数，MCP OAuth 会把授权令牌放在这里。
   getTokenStorage,
-  //  导入会话列表读取函数，用于 --resume 查找历史会话。
-  listSessions,
   //  导入插件加载函数，用来扫描并加载所有可用插件。
   loadAllPlugins,
   //  导入 MCP 配置加载函数，用来从磁盘读取并启动 MCP 服务器。
   loadMcpFromDisk,
-  //  导入单个会话加载函数，用于恢复历史对话。
-  loadSession,
   //  导入用户配置读取函数，用来取主题、thinking 开关等持久化配置。
   loadUserConfig,
-  //  导入最近会话选择函数，用于 --continue 快速继续。
-  pickLatestSession,
-  //  导入模型 id 解析函数，用默认配置或参数得到最终模型。
+  //  导入模型 id 解析函数，用默认配置得到最终模型。
   resolveModelId,
 } from '@tegent/core'
 //  只导入 TypeScript 类型，编译成 JavaScript 时不会产生运行时代码。
-import type { AgentOptions, HookBus, LoadedSession, McpRegistry } from '@tegent/core'
+import type { AgentOptions, HookBus, McpRegistry } from '@tegent/core'
 
 //  从本地 app 模块导入清理函数获取器和启动 TUI 的函数。
 import { getCleanupFn, startApp } from './app.js'
 //  导入命令行参数解析函数。
 import { parseCliArgs } from './cli-args.js'
-//  导入插件子命令入口，用于 xc plugin ... 这种非交互命令。
-import { runPluginCli } from './plugin-cli.js'
 //  导入启动时需要打印的提示和更新检查函数。
 import { checkForUpdate, printNoApiKeyMessage, printNoWebSearchKeyHint, printResumeHint } from './startup-prints.js'
-
-;(globalThis as { AI_SDK_LOG_WARNINGS?: unknown }).AI_SDK_LOG_WARNINGS = (options: {
-  //  声明回调参数里的 warnings 字段：这里是一组未知结构的警告对象。
-  warnings: unknown[]
-  //  声明可选的 provider 字段：表示警告来自哪个模型供应商。
-  provider?: string
-  //  声明可选的 model 字段：表示警告来自哪个具体模型。
-  model?: string
-  //  结束参数类型声明，并开始这个警告处理回调的函数体。
-}) => {
-  //  逐个遍历 AI SDK 传来的每一条警告。
-  for (const warning of options.warnings) {
-
-  
-  }
-  //  结束当前代码块。
-}
 
 //  chalk 是一个给终端文字上色的库。
 // 这里根据 stderr 是否是真正的终端（TTY）决定颜色等级：
@@ -234,7 +205,7 @@ async function gracefulShutdown(exitCode: number): Promise<never> {
   // 颜色已重置、raw 模式已关闭、光标已可见。
   // 这个提示从一个同步捕获的快照里读取（由 App 通过 onSessionInfoReady 注册），
   // 所以不依赖仍在运行的异步清理。
-  //  打印恢复会话提示，方便用户下次用 --resume 接着聊。
+  //  打印恢复会话提示，方便用户下次进入 TUI 后用 /resume 接着聊。
   printResumeHint()
   //  按传入的退出码真正结束 Node 进程。
   process.exit(exitCode)
@@ -255,29 +226,11 @@ async function main() {
 
   //  即发即忘的更新检查——查询 npm 仓库（带 24 小时磁盘缓存），
   // 如果存在新版本就打印一行提示。绝不阻塞启动，也绝不抛错。
-  // 在 --print 模式和非 TTY 环境下不执行。
+  // 在非 TTY 环境下不执行（checkForUpdate 内部会检查 stderr.isTTY）。
   //  后台启动版本更新检查；void 表示故意不等待这个 Promise。
   void checkForUpdate().catch(() => undefined)
 
-  //  非交互式的插件管理子命令。
-  // 必须在 yargs 解析其余参数之前就拦截——否则 `xc plugin install ./foo`
-  // 会被当成一个「提示词」交给 agent 去回答。这个子命令不挂载 Ink，
-  // 执行完就退出。
-  //  取得用户输入的原始命令行参数，并去掉 node 和脚本路径。
-  // 比如用户运行：xc plugin install ./foo
-  // rawArgs 会变成：['plugin', 'install', './foo']
-  const rawArgs = hideBin(process.argv)
-  //  如果第一个参数是 plugin，就进入插件管理子命令分支。
-  if (rawArgs[0] === 'plugin') {
-    // 如果第一个参数是 plugin，就说明用户要执行插件管理命令，而不是进入聊天/agent 模式。
-    //  运行插件 CLI 子命令，并等待它返回退出码。
-    const exitCode = await runPluginCli(rawArgs.slice(1)) // 它会把后面的参数：['install', './foo']，交给 runPluginCli 去处理。执行完后拿到退出码，比如 0 成功、1 失败，然后用 process.exit(exitCode) 结束进程。
-    //  按传入的退出码真正结束 Node 进程。
-    process.exit(exitCode)
-    //  结束当前代码块。
-  }
-
-  //  解析命令行参数（yargs），argv 里包含 model、print、resume 等
+  //  解析命令行参数（yargs），argv 里包含 model、resume 等
   //  解析普通 CLI 参数，得到结构化的 argv 对象。
   const argv = await parseCliArgs()
 
@@ -312,31 +265,14 @@ async function main() {
   }
 
   //  解析模型 id（格式是 `provider:model`，比如 `anthropic:claude-...`）
-  //  根据 --model 参数或用户配置解析最终要用的模型 id。
-  let modelId = resolveModelId(argv.model) // 解析模型 id，优先使用命令行参数，如果没有就用用户配置的默认模型。resolveModelId 函数里面会判断用户配置的
-  //  如果没能解析出模型，说明模型参数或供应商配置有问题。
+  //  从用户配置（~/.tegent/config.json）或环境变量检测解析默认模型 id。
+  let modelId = resolveModelId() // 解析模型 id：取用户配置的默认模型，没有就按供应商检测顺序找第一个有 key 的。
+  //  如果没能解析出模型，说明没有任何供应商配置 key。
   if (!modelId) {
-    //  用户指定了一个模型，但它的供应商没有配置 key
-    //  保存用户显式请求的模型名，后面用来判断该报错还是给普通提示。
-    const requested = argv.model
-    //  如果用户明确传了模型，就按明确错误处理。
-    if (requested) {
-      //  从 provider:model 字符串里取出 provider 部分。
-      const provider = requested.split(':')[0]
-      //  查这个 provider 应该使用哪个 API key 环境变量；查不到就拼一个默认名字。
-      const envVar = getEnvVarName(provider) ?? `${provider.toUpperCase()}_API_KEY`
-      //  向标准错误输出打印信息。
-      console.error(`Error: ${envVar} is not set. Please set this environment variable to use ${requested}.`)
-      //  用退出码 1 结束进程，表示发生了错误。
-      process.exit(1)
-      //  进入 else 分支，也就是前面的 if 条件不成立时要执行的路径。
-    } else {
-      //  打印没有配置 API key 时的帮助信息。
-      printNoApiKeyMessage()
-      //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
-      process.exit(0)
-      //  结束当前代码块。
-    }
+    //  打印没有配置 API key 时的帮助信息。
+    printNoApiKeyMessage()
+    //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
+    process.exit(0)
     //  结束当前代码块。
   }
 
@@ -346,7 +282,6 @@ async function main() {
   // 或者某个供应商被整个移除出构建（比如 kimicode 在某次功能回滚后）。
   // 否则注册表会在 languageModel() 处抛出 NoSuchProviderError，
   // 在 UI 还没挂载前就致命退出。
-  // 对于显式的 `--model`，我们仍然硬失败（用户意图明确）；
   // 对于持久化/智能默认的 id，我们回退到第一个可用的供应商，保证 CLI 仍可用。
   //  从已解析的模型 id 中取出供应商名，用来确认它当前真的可用。
   const requestedProvider = modelId.split(':')[0]
@@ -354,14 +289,6 @@ async function main() {
   if (!availableProviders.includes(requestedProvider)) {
     //  查这个 provider 应该使用哪个 API key 环境变量；查不到就拼一个默认名字。
     const envVar = getEnvVarName(requestedProvider) ?? `${requestedProvider.toUpperCase()}_API_KEY`
-    //  根据括号里的条件决定是否执行后面的代码块。
-    if (argv.model) {
-      //  向标准错误输出打印信息。
-      console.error(`Error: ${envVar} is not set. Please set this environment variable to use ${argv.model}.`)
-      //  用退出码 1 结束进程，表示发生了错误。
-      process.exit(1)
-      //  结束当前代码块。
-    }
     //  按预设顺序找第一个环境变量存在的供应商作为回退。
     const fallback = PROVIDER_DETECTION_ORDER.find(({ envKey }) => process.env[envKey])
     //  如果理论上找不到回退供应商，就走防御性提示并退出。
@@ -398,37 +325,22 @@ async function main() {
   //  根据模型 id 从注册表中取得真正会调用的语言模型对象。
   const model = providerRegistry.languageModel(modelId as `${string}:${string}`)
 
-  //  --plugin-debug 或环境变量 XC_PLUGIN_DEBUG=1：
-  // 把插件/钩子/市场的 debugLog 面包屑镜像输出到 stderr，
-  // 这样无需 tail 日志文件就能实时看到。要在 ensureDefaultMarketplaces 之前安装，
-  // 这样首次运行的订阅消息也能显示。做成 debugLog 的全局钩子，而不是新建一个日志器——
-  // 这样所有现有调用点都自动生效，避免出现两条平行的日志路径。
-  //  如果用户开启插件调试，就进入调试镜像分支。
-  if (argv['plugin-debug'] || process.env.XC_PLUGIN_DEBUG === '1') {
-    //  打开插件调试日志到 stderr 的镜像输出。
-
-    //  结束当前代码块。
-  }
 
   //  首次运行的种子数据：如果还没有订阅文件，就把默认的
   // `anthropic-marketplace` 订阅写入 known_marketplaces.json。
   // 这是幂等操作——明确删除过该订阅的用户不会被重新加回来。
   // 要在 loadAllPlugins 之前做，这样首次运行就能看到一个已填充的市场列表。
-  //  如果没有用 --no-plugins 禁用插件，就执行插件相关初始化。
-  if (argv.plugins !== false) {
-    //  确保默认插件市场订阅存在；失败只写调试日志，不中断启动。
-    await ensureDefaultMarketplaces().catch((err) => {})
-    //  结束当前代码块。
-  }
+  //  确保默认插件市场订阅存在；失败只写调试日志，不中断启动。
+  await ensureDefaultMarketplaces().catch((err) => {})
 
   //  插件必须在 skill / 子 agent / MCP 注册表之前加载，
-  // 这样插件的贡献才能被合并进各个注册表。`--no-plugins` 会短路整条链。
+  // 这样插件的贡献才能被合并进各个注册表。
   // 非致命的加载错误会以和下面 `[mcp] config error in ...` 相同的样式输出到 stderr——
   // 一个坏插件绝不会阻塞其他插件。
   // 详细诊断（冲突、不支持的命令、钩子错误）通过 debugLogIntegrationDiagnostics 写入 debug.log，
   // 供 `/plugin doctor` 命令展示。
-  //  加载所有插件，disabled 为 true 时返回禁用状态下的空结果。
-  const pluginLoad = await loadAllPlugins({ cwd: process.cwd(), disabled: argv.plugins === false })
+  //  加载所有插件。
+  const pluginLoad = await loadAllPlugins({ cwd: process.cwd() })
   //  遍历插件加载错误，把每个错误展示给用户。
   for (const e of pluginLoad.registry.loadErrors()) {
     //  向标准错误输出打印信息。
@@ -496,10 +408,8 @@ async function main() {
   //  保存 MCP 注册表，用于退出时关闭。
   //  把 MCP 注册表保存到模块级变量，供退出清理时使用。
   mcpRegistryForShutdown = mcpLoadResult.registry
-  //  设置 --no-hooks 时不保存 hookBus，退出时就不会触发 SessionEnd 钩子——
-  // 用户明确表示这次会话不执行任何钩子。
-  //  根据 --no-hooks 决定退出时是否保存并触发插件钩子总线。
-  hookBusForShutdown = argv.hooks === false ? null : pluginIntegration.hookBus
+  //  保存插件钩子总线，退出时触发 SessionEnd 钩子。
+  hookBusForShutdown = pluginIntegration.hookBus
 
   //  如果 MCP 配置加载时出现错误，就准备输出这些错误。
   if (mcpLoadResult.configErrors.length > 0) {
@@ -527,22 +437,18 @@ async function main() {
   const options: AgentOptions = {
     //  把最终模型 id 放入 agent 选项。
     modelId,
-    //  把信任模式参数放入 agent 选项。
-    trustMode: argv.trust,
-    //  把是否打印模式放入 agent 选项。
-    printMode: argv.print,
-    //  把最大轮数限制放入 agent 选项。
-    maxTurns: argv['max-turns'],
+    //  信任模式默认关闭；写操作在会话里逐次向用户确认。
+    trustMode: false,
     //  从磁盘读取持久化的 /thinking 开关。默认 false，这样在无配置的机器上启动
     // 与该功能引入前的行为一致（供应商默认的 thinking 行为，没有意外的延迟/成本跳变）。
     // App.tsx 里的 /thinking 命令可以通过 useAgent 的 setThinking 热替换这个标志，无需重启。
     //  把 /thinking 开关放入 agent 选项；配置缺失时默认 false。
     thinking: loadUserConfig().thinking ?? false,
     //  计划模式（plan mode）是「会话级」作用域（与 Claude Code 一致）——
-    // 只有 `--plan` 命令行标志会在启动时启用。会话中用 /plan 切换不会持久化，
-    // 所以每次新启动都从 'default'（默认模式）开始，除非显式请求。
-    //  根据 --plan 决定权限模式是 plan 还是 default。
-    permissionMode: argv.plan ? 'plan' : 'default',
+    // 会话中用 /plan 切换不会持久化，所以每次新启动都从 'default'
+    // （默认模式）开始，进入会话后可用 /plan 开启。
+    //  每次启动都从默认权限模式开始。
+    permissionMode: 'default',
     //  把模型注册表交给 agent 引擎。
     modelRegistry: providerRegistry,
     //  把子 agent 注册表交给 agent 引擎。
@@ -553,19 +459,12 @@ async function main() {
     mcpRegistry: mcpLoadResult.registry,
     //  导入 MCP 权限存储类，用来记住 MCP 工具的允许策略。
     mcpPermissionStore,
-    //  --no-plugins：把 pluginRegistry 留作 undefined，
-    // 这样 /plugin 斜杠命令能显示「Plugin system is disabled...」，
-    // 而不是落到通用的空状态（「No plugins installed」）。
-    // loadAllPlugins 在 disabled:true 时仍会返回一个（非 null 的）空注册表，
-    // 所以我们必须在这里连接的位置把它丢弃，而不能只依赖加载结果。
-    //  根据 --no-plugins 决定是否把插件注册表交给 agent 引擎。
-    pluginRegistry: argv.plugins === false ? undefined : pluginLoad.registry,
+    //  把插件注册表交给 agent 引擎。
+    pluginRegistry: pluginLoad.registry,
     //  把斜杠命令注册表交给 agent 引擎。
     commandRegistry,
-    //  --no-hooks：换上一个空的 hookBus，这样所有 emit（触发）调用都是空操作，
-    // 而不影响其余插件加载（skill / agent / mcp 仍然注册，只是没有东西监听生命周期事件）。
-    //  根据 --no-hooks 决定使用空钩子总线还是真实插件钩子总线。
-    hookBus: argv.hooks === false ? emptyHookBus() : pluginIntegration.hookBus,
+    //  把插件钩子总线交给 agent 引擎。
+    hookBus: pluginIntegration.hookBus,
     //  结束当前代码块。
   }
 
@@ -586,103 +485,12 @@ async function main() {
     //  结束当前代码块。
   }
 
-  //  恢复 / 继续之前的会话。有三个入口：
-  //   1. `--continue`（-c）：在这里同步加载最近一次会话，不弹选择器。方便肌肉记忆式快速继续。
-  //   2. `--resume <id>`：按 id / slug / 文件名前缀查找会话并直接加载。
-  //      我们退出后打印的提示（"Resume: xc --resume <id>"）会反过来喂给这个分支。
-  //   3. `--resume`（不带值）：交给 Ink 内的选择器（resumeIntent='pick'），让用户浏览挑选。
-  // 如果同时设置了 --continue 和 --resume，--continue 优先（与 Claude Code 一致）。
-  //  声明初始会话变量；没有恢复会话时保持 null。
-  let initialSession: LoadedSession | null = null
-  //  声明恢复意图；为 pick 时表示启动后打开会话选择器。
-  let resumeIntent: 'pick' | null = null
-  //  如果用户传了 --continue，就进入最近会话恢复流程。
-  if (argv.continue) {
-    //  --continue：找最近一次会话
-    //  查找当前项目最近一次保存的会话。
-    const latest = await pickLatestSession()
-    //  如果没有历史会话，就提示用户并继续开新会话。
-    if (!latest) {
-      //  打印 --continue 找不到历史会话的提示。
-      console.error('Note: --continue specified but no past sessions found in this project. Starting a fresh session.')
-      //  进入 else 分支，也就是前面的 if 条件不成立时要执行的路径。
-    } else {
-      //  从指定文件读取并解析历史会话。
-      const loaded = await loadSession(latest.filePath)
-      //  如果会话加载成功，就把它作为启动时要恢复的会话。
-      if (loaded) initialSession = loaded
-      //  结束当前代码块。
-    }
-    //  如果用户传了 --resume，就按 resume 的值进入对应恢复流程。
-  } else if (typeof argv.resume === 'string') {
-    //  --resume 分支
-    //  如果 --resume 没带具体值，就设置为稍后打开选择器。
-    if (argv.resume === '') {
-      //  `--resume` 不带值 → 弹选择器
-      //  记录恢复意图为 pick，让 TUI 启动后弹出会话选择器。
-      resumeIntent = 'pick'
-      //  进入 else 分支，也就是前面的 if 条件不成立时要执行的路径。
-    } else {
-      //  `--resume <id>` → 按 id 查找
-      //  根据用户输入的 id、slug 或前缀查找具体会话文件。
-      const filePath = await findSessionFile(argv.resume)
-      //  如果找不到对应会话文件，就打印错误并退出。
-      if (!filePath) {
-        //  开始向 stderr 打印错误或提示信息。
-        console.error(
-          //  执行这一行 TypeScript 代码，继续完成当前启动或清理流程。
-          `Error: no session found matching "${argv.resume}". Run \`xc --resume\` to pick from the list, or \`xc -c\` for the most recent.`,
-          //  结束当前多行函数调用。
-        )
-        //  用退出码 1 结束进程，表示发生了错误。
-        process.exit(1)
-        //  结束当前代码块。
-      }
-      //  从指定文件读取并解析历史会话。
-      const loaded = await loadSession(filePath)
-      //  如果会话文件存在但解析失败，就打印损坏提示并退出。
-      if (!loaded) {
-        //  向标准错误输出打印信息。
-        console.error(`Error: failed to load session at ${filePath}. The file may be corrupted.`)
-        //  用退出码 1 结束进程，表示发生了错误。
-        process.exit(1)
-        //  结束当前代码块。
-      }
-      //  把成功加载的会话设置为启动时要恢复的会话。
-      initialSession = loaded
-      //  结束当前代码块。
-    }
-    //  结束当前代码块。
-  }
+  //  会话恢复不通过命令行参数入口——要继续历史会话，
+  // 进入交互模式后用 /resume 斜杠命令打开选择器。
 
   //  把 stdin 内容和命令行提示词合并成完整提示词（用空行分隔）
   //  把管道输入和命令行提示词过滤掉空值后，用两个换行合成完整提示词。
   const fullPrompt = [stdinContent, prompt].filter(Boolean).join('\n\n')
-
-  //  打印模式（-p / --print）：完全绕过 Ink（TUI 框架）。
-  // 挂载 TUI 会引用 raw stdin，这让 Node 事件循环在排队卸载之后还保持存活——
-  // 这就是为什么以前 -p 会卡到按键才退出的原因。详见 packages/cli/src/print.ts。
-  // 打印模式是「非交互」的：给定提示词，跑完，把结果输出到 stdout，就退出。
-  //  如果是 --print 模式，就走非交互执行分支。
-  if (argv.print) {
-    //  打印模式必须有提示词；没有就报错退出。
-    if (!fullPrompt) {
-      //  告诉用户 --print 需要从参数或 stdin 提供提示词。
-      console.error('Error: -p / --print requires a prompt (as an argument or via stdin).')
-      //  用退出码 1 结束进程，表示发生了错误。
-      process.exit(1)
-      //  结束当前代码块。
-    }
-    //  按需动态导入打印模式实现，避免普通交互启动提前加载它。
-    const { runPrintMode } = await import('./print.js')
-    //  运行打印模式，并取得它给出的退出码。
-    const code = await runPrintMode(model, options, fullPrompt, initialSession)
-    //  调用终端恢复函数，确保退出后终端能正常使用。
-    resetTerminal()
-    //  执行这一行 TypeScript 代码，继续完成当前启动或清理流程。
-    process.exit(code)
-    //  结束当前代码块。
-  }
 
   //  提醒：WebSearch（联网搜索）需要 API key。
   // 在 Ink 接管之前打印一次，让提示落在 TUI 上方的滚动历史里。
@@ -696,57 +504,15 @@ async function main() {
   }
 
   //  启动主应用（挂载 Ink TUI）。waitUntilExit 在 Ink 卸载时 resolve（包括 Ctrl+C 触发的卸载）。
-  // startApp 接收：模型、选项、初始提示词、以及会话恢复信息。
+  // startApp 接收：模型、选项、初始提示词。要恢复历史会话，进入 TUI 后用 /resume 选择。
   //  启动 Ink TUI，并拿到一个会在应用退出时完成的 Promise。
-  const waitUntilExit = startApp(model, options, fullPrompt || undefined, {
-    //  把要恢复的初始会话传给 App。
-    initialSession,
-    //  把是否打开恢复选择器的意图传给 App。
-    resumeIntent,
-    //  结束当前函数调用或回调表达式。
-  })
+  const waitUntilExit = startApp(model, options, fullPrompt || undefined)
   //  等待 TUI 卸载；用户退出或 Ctrl+C 都会走到这里。
   await waitUntilExit()
 
   //  正常退出路径（包括 Ctrl+C，它会先卸载 Ink）。
   //  TUI 正常结束后，用退出码 0 走统一清理流程。
   await gracefulShutdown(0)
-  //  结束当前代码块。
-}
-
-//  把用户提供的「会话查找 key」解析成会话 jsonl 文件路径。
-// 接受用户从我们退出后打印的提示里可能粘贴的各种形式：
-//   - 纯 sessionId（`20260101-120000-000`）
-//   - slug（任务别名，如 `fix-login`）
-//   - 完整文件名主干（`fix-login-20260101-120000-000`）
-// 优先精确匹配；如果没有精确匹配，就回退到 sessionId 的前缀匹配（长度要足够消歧）。
-// 返回第一个匹配的文件路径（按从新到旧排序），找不到返回 null。
-//  定义会话文件查找函数，输入是用户提供的查找字符串。
-async function findSessionFile(input: string): Promise<string | null> {
-  //  读取当前项目的历史会话列表，通常已经按新到旧排序。
-  const sessions = await listSessions()
-  //  遍历每个历史会话，先做精确匹配。
-  for (const s of sessions) {
-    //  如果输入正好等于 sessionId，就返回这个会话文件路径。
-    if (s.sessionId === input) return s.filePath
-    //  如果输入正好等于任务 slug，也返回这个会话文件路径。
-    if (s.taskSlug && s.taskSlug === input) return s.filePath
-    //  根据括号里的条件决定是否执行后面的代码块。
-    if (s.taskSlug && `${s.taskSlug}-${s.sessionId}` === input) return s.filePath
-    //  结束当前代码块。
-  }
-  //  只有输入长度至少 8 位时才允许前缀匹配，降低误匹配风险。
-  if (input.length >= 8) {
-    //  遍历每个历史会话，先做精确匹配。
-    for (const s of sessions) {
-      //  如果 sessionId 以前缀开头，就返回这个会话文件路径。
-      if (s.sessionId.startsWith(input)) return s.filePath
-      //  结束当前代码块。
-    }
-    //  结束当前代码块。
-  }
-  //  所有匹配都失败时返回 null，表示没有找到。
-  return null
   //  结束当前代码块。
 }
 
@@ -790,7 +556,7 @@ function loadEnvFile(): void {
 //  启动阶段（Ink 挂载之前）用的「朴素终端」提问函数。
 // 目前唯一的调用方是 MCP 项目级信任对话框——
 // loader.ts 把它的 `askUser` 回调传入一个任意选项列表，并期望拿回某个选项的 label。
-// 当 stdin 不是 TTY（管道输入、CI 环境、--print 模式）时优雅回退：
+// 当 stdin 不是 TTY（管道输入、CI 环境）时优雅回退：
 // 如果有 label 像 "skip" 的选项就返回它，否则返回第二个选项
 // （loader 的约定是 index 1 == 安全默认值）。这保证我们绝不会为了永远不会到来的输入而阻塞。
 //  定义启动阶段的终端问答函数，返回用户选择的选项 label。
@@ -805,7 +571,7 @@ async function askInTerminal(
   //  计算安全默认选项：优先含 skip 的 label，其次第二项，再其次第一项。
   const safeDefault = options.find((o) => /skip/i.test(o.label))?.label ?? options[1]?.label ?? options[0]?.label ?? ''
 
-  //  不是 TTY 就直接返回安全默认值（管道/CI/--print 模式）
+  //  不是 TTY 就直接返回安全默认值（管道/CI 环境）
   //  如果输入或输出不是终端，就不能交互提问，直接使用默认选项。
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     //  返回前面算出的安全默认选项。
@@ -959,7 +725,7 @@ process.on('SIGINT', () => {
     // 可能泄漏到 shell 里。
     //  调用终端恢复函数，确保退出后终端能正常使用。
     resetTerminal()
-    //  打印恢复会话提示，方便用户下次用 --resume 接着聊。
+    //  打印恢复会话提示，方便用户下次进入 TUI 后用 /resume 接着聊。
     printResumeHint()
     //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
     process.exit(0)

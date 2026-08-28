@@ -96,10 +96,11 @@ export function printNoWebSearchKeyHint(): void {
 } // 结束无 WebSearch key 提示函数。
 
 /**
- * 在 Ink 已卸载且终端已经复位之后，打印一条可复制的会话恢复命令。
+ * 在 Ink 已卸载且终端已经复位之后，打印一条会话恢复提示。
  *
- * 该行为对齐 Claude Code 的退出体验，让用户关闭聊天后也能明确回到同一线程。
- * 如果有 taskSlug，就优先使用带 slug 前缀的 id，因为它在 `ls` 输出里更容易阅读。
+ * 恢复入口是交互模式内的 /resume 斜杠命令（打开会话选择器）；
+ * 这里同时打印会话标识，方便用户在选择器列表里认出目标会话。
+ * 如果有 taskSlug，就优先使用带 slug 前缀的 id，因为它在列表里更容易阅读。
  * 如果没有 slug，例如首条消息完全由 CJK 字符组成，则回退到裸 sessionId。
  *
  * 当当前会话还没有任何消息时会抑制输出，避免指向一个空的 jsonl 文件。
@@ -108,9 +109,9 @@ export function printResumeHint(): void {
   const info = getSessionExitInfo() // 读取当前会话的退出信息；没有有效会话时返回空值。
   if (!info) return // 如果没有会话信息，直接跳过恢复提示。
   const key = info.taskSlug ? `${info.taskSlug}-${info.sessionId}` : info.sessionId // 优先拼接 slug 和 sessionId，否则只使用 sessionId。
-  const cmd = chalk.cyan(`xc --resume ${key}`) // 把恢复命令着成青色，方便用户复制识别。
+  const cmd = chalk.cyan('/resume') // 把恢复命令着成青色，方便用户复制识别。
   const dim = chalk.gray // 缓存灰色样式函数，用于弱化提示前缀。
-  process.stdout.write(`${dim('Resume this session:')} ${cmd}\n`) // 写到 stdout，输出最终的恢复命令提示。
+  process.stdout.write(`${dim('Resume this session:')} start tegent and run ${cmd} (session: ${key})\n`) // 写到 stdout，输出最终的恢复提示。
 } // 结束会话恢复提示函数。
 
 // ── 启动阶段更新检查 ──────────────────────────────────────────────────

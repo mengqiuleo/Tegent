@@ -676,7 +676,6 @@ export function App({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Print mode 已经不再走 Ink 路径，详见 packages/cli/src/print.ts。
   // 早期这里曾尝试通过 effect 执行 `cleanup().then(exit)`，
   // 但 usePromptInput 持有的 raw stdin 引用会让事件循环在卸载后继续存活，
   // 导致退出挂起，直到用户按键或调整终端大小。

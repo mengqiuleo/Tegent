@@ -658,7 +658,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
         })
 
         // 调用 core 的 agentLoop：CLI 提供 content、模型、options、callbacks 和旧 LoopState。
-        // agentLoop 返回 { state, turnCount }；交互式主循环只保存长生命周期 state，turnCount 留给子代理/--print 场景。
+        // agentLoop 返回 { state, turnCount }；交互式主循环只保存长生命周期 state，turnCount 留给子代理场景。
         const agentResult = await agentLoop(
           content,
           modelRef.current,

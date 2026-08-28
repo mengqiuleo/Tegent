@@ -22,8 +22,6 @@
 import fs from 'node:fs/promises' // 导入 promise 版 fs，用于异步读写历史文件。
 import path from 'node:path' // 导入路径工具，用于拼接项目内历史文件路径。
 
-import type { PastedContents } from './paste-refs.js' // 导入粘贴引用内容类型，只在类型检查阶段使用。
-
 const HISTORY_FILE = '.tegent/history.jsonl' // 相对项目根目录的历史文件路径。
 
 /**
@@ -42,19 +40,8 @@ export const HISTORY_MAX = 100
 export interface InputHistoryEntry {
   /**
    * 提交前的输入框文本。
-   *
-   * 如果启用了大段粘贴引用，这里保存的是含 `[Pasted text #N]` 占位符的形式。
-   * 恢复历史时这样能让输入框保持紧凑，而不是直接把整段粘贴内容展开到当前画面。
    */
   text: string
-
-  /**
-   * 粘贴引用内容表。
-   *
-   * key 是粘贴 id，value 是对应的原始粘贴内容。
-   * 当前 Ink 第一版可以为空对象，但保留字段用于兼容历史数据结构。
-   */
-  pasted: PastedContents
 
   /**
    * 历史记录创建时间。
@@ -105,7 +92,6 @@ export async function loadInputHistory(cwd: string = process.cwd()): Promise<Inp
       if (typeof parsed.text !== 'string' || !parsed.text) continue // 没有有效 text 的记录直接跳过。
       out.push({
         text: parsed.text, // 保存历史文本。
-        pasted: (parsed.pasted as PastedContents | undefined) ?? {}, // pasted 缺失时用空对象兜底。
         ts: typeof parsed.ts === 'number' ? parsed.ts : 0, // ts 缺失或类型不对时用 0 兜底。
       })
     } catch {
