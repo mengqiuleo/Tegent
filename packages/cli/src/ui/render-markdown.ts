@@ -13,7 +13,6 @@ import { Chalk } from 'chalk'
 import { type Token, type Tokens, marked } from 'marked'
 
 import { detectFenceLanguage, highlightLine } from './syntax-highlight.js'
-import { GLYPH_BLOCKQUOTE_BAR, GLYPH_LIST_BULLET } from './terminal-glyphs.js'
 import { visualWidth } from './text-width.js'
 import { BLUE_PURPLE, SPINNER_BLUE as LINK } from './theme.js'
 
@@ -21,7 +20,7 @@ const c = new Chalk({ level: 3 })
 
 const EOL = '\n'
 
-const BLOCKQUOTE_BAR = GLYPH_BLOCKQUOTE_BAR
+const BLOCKQUOTE_BAR = '▎'
 
 // Inline code tint — matches Claude Code's `permission` color (rgb(177,185,249))
 const CODE_INLINE = BLUE_PURPLE
@@ -254,7 +253,7 @@ function formatToken(
         // rendering and assume nothing happened).
         const marker =
           orderedListNumber === null
-            ? c.hex(BLUE_PURPLE)(GLYPH_LIST_BULLET)
+            ? c.hex(BLUE_PURPLE)('•')
             : c.hex(BLUE_PURPLE)(`${getListNumber(listDepth, orderedListNumber)}.`)
         const content = tx.tokens
           ? tx.tokens.map((t) => formatToken(t, listDepth, orderedListNumber, token)).join('')

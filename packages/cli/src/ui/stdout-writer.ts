@@ -24,7 +24,6 @@ import type { DisplayMessage, DisplayToolCall } from '@tegent/core'
 
 import { renderEditDiff } from './render-diff.js'
 import { renderInlineMarkdown, renderMarkdown } from './render-markdown.js'
-import { GLYPH_BULLET, GLYPH_ELLIPSIS, GLYPH_PROMPT_ARROW, GLYPH_RESULT_BRACKET } from './terminal-glyphs.js'
 import { BLUE_PURPLE, ERROR, PROMPT_BORDER, SUCCESS } from './theme.js'
 import {
   RESULT_INDENT,
@@ -49,7 +48,7 @@ export type InkWrite = (data: string) => void
  */
 function truncatePreview(s: string, maxLen: number): string {
   if (maxLen < 4 || s.length <= maxLen) return s
-  return s.slice(0, maxLen - 1) + GLYPH_ELLIPSIS
+  return s.slice(0, maxLen - 1) + '…'
 }
 
 function formatToolCall(tc: DisplayToolCall): string {
@@ -74,7 +73,7 @@ function formatToolCall(tc: DisplayToolCall): string {
 
   const dotColor = isFailure ? ERROR : SUCCESS
   const previewSuffix = inputPreview ? c.hex(BLUE_PURPLE)(`(${inputPreview})`) : ''
-  const line1 = ` ${c.hex(dotColor)(GLYPH_BULLET)} ${c.bold(label)}${previewSuffix}`
+  const line1 = ` ${c.hex(dotColor)('●')} ${c.bold(label)}${previewSuffix}`
 
   // Edit / writeFile success path: render the structured diff under the
   // bullet INSTEAD of the plain "Wrote N lines" / "Applied changes" summary.
@@ -84,7 +83,7 @@ function formatToolCall(tc: DisplayToolCall): string {
   if (tc.editPayload && !isFailure) {
     const cols = Math.max(40, process.stdout.columns ?? 120)
     const diffLines = renderEditDiff(tc.editPayload, cols)
-    const head = `   ${c.gray(GLYPH_RESULT_BRACKET)}  ${diffLines[0] ?? ''}`
+    const head = `   ${c.gray('⎿')}  ${diffLines[0] ?? ''}`
     const body = diffLines.slice(1)
     const durSuffix = durationStr ? c.gray(` (${durationStr})`) : ''
     const combined = body.length > 0 ? [head, ...body] : [head]
@@ -114,7 +113,7 @@ function formatToolCall(tc: DisplayToolCall): string {
   // applying it before splitting would split on ANSI-reset sequences
   // embedded mid-style and leave half the body uncolored. Apply per line.
   const paint = isFailure ? (s: string) => c.hex(ERROR)(s) : (s: string) => s
-  const head = `   ${c.gray(GLYPH_RESULT_BRACKET)}  ${paint(lines[0] ?? '')}`
+  const head = `   ${c.gray('⎿')}  ${paint(lines[0] ?? '')}`
   const tail = lines.slice(1).map((l) => `${RESULT_INDENT}${paint(l)}`)
   // Duration goes on the last visible line of the body so it reads like
   // "... +13 lines (1.2s)" on truncated summaries.
@@ -248,7 +247,7 @@ function writeToolRow(write: InkWrite, tc: DisplayToolCall): void {
 function writeCollapsedGroup(write: InkWrite, tools: readonly DisplayToolCall[]): void {
   const { label, detail } = formatReadGroupSummary(tools)
   const detailSuffix = detail ? c.hex(BLUE_PURPLE)(`(${detail})`) : ''
-  const line = ` ${c.hex(SUCCESS)(GLYPH_BULLET)} ${c.bold(label)}${detailSuffix}`
+  const line = ` ${c.hex(SUCCESS)('●')} ${c.bold(label)}${detailSuffix}`
   const lead = prevWriteEndedWithBlankRow ? '' : '\n'
   write(toCRLF(lead + line + '\n'))
   prevWriteEndedWithBlankRow = false
@@ -321,7 +320,7 @@ export function writeMessageToStdout(write: InkWrite, msg: DisplayMessage): void
     const content = normalizeLineEndings(msg.content)
 
     const lines = content.split('\n')
-    const head = `  ${c.gray(GLYPH_RESULT_BRACKET)}  ${renderInlineMarkdown(lines[0] ?? '')}`
+    const head = `  ${c.gray('⎿')}  ${renderInlineMarkdown(lines[0] ?? '')}`
     const tail = lines.slice(1).map((l) => `${RESULT_INDENT}${renderInlineMarkdown(l)}`)
     write(toCRLF([head, ...tail].join('\n') + '\n'))
     prevWriteEndedWithBlankRow = false
@@ -426,7 +425,7 @@ export function writeMessageToStdout(write: InkWrite, msg: DisplayMessage): void
  * matching Claude Code's 2-line command block.
  */
 function writeUserMessage(write: InkWrite, content: string, compact = false): void {
-  const arrow = c.hex(PROMPT_BORDER)(GLYPH_PROMPT_ARROW)
+  const arrow = c.hex(PROMPT_BORDER)('❯')
   const lines = content.split('\n')
   const [first = '', ...rest] = lines
   const indentedRest = rest.map((line) => `  ${line}`)

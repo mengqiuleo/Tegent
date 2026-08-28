@@ -33,7 +33,6 @@ import { createMcpCommandHandler } from '../commands/mcp.js'
 import { createPluginCommandHandler } from '../commands/plugin.js'
 import { createSkillCommandHandler } from '../commands/skill.js'
 import { useAgent } from '../hooks/use-agent.js'
-import { GLYPH_BULLET } from '../terminal-glyphs.js'
 import { parseBooleanArg } from '../utils.js'
 import { getHeaderRowCount } from './AppHeader.js'
 // import { ChatInput } from './ChatInput.js'
@@ -898,7 +897,7 @@ export function App({
     for (const [provider, models] of Object.entries(PROVIDER_MODELS)) {
       if (!providers.has(provider)) continue
       for (const m of models) {
-        const marker = m.id === state.modelId ? `${GLYPH_BULLET} ` : '  '
+        const marker = m.id === state.modelId ? `● ` : '  '
         choices.push({ id: m.id, label: `${marker}${m.label}`, description: `${m.id} — ${m.description}` })
       }
     }
@@ -914,7 +913,7 @@ export function App({
     // askQuestion resolve 的是用户选中项的 label，而不是 model id。
     // SelectOptions 面向可读选项设计，所以这里需要通过刚才 push 的 label 反查 id。
     const answer = await askQuestion(
-      `Current: ${state.modelId}\nPick a model (${GLYPH_BULLET} = current):`,
+      `Current: ${state.modelId}\nPick a model (● = current):`,
       choices.map((c) => ({ label: c.label, description: c.description })),
       { noOther: true },
     )
@@ -1007,8 +1006,8 @@ export function App({
     // 不带参数时打开交互式选择器。
     // 始终展示 On 和 Off 两个选项，让用户看到完整状态空间；
     // 当前选项用 `● ` 标记，和 `/model` 的渲染保持一致。
-    const onMarker = current ? `${GLYPH_BULLET} ` : '  '
-    const offMarker = current ? '  ' : `${GLYPH_BULLET} `
+    const onMarker = current ? `● ` : '  '
+    const offMarker = current ? '  ' : `● `
     const choices = [
       {
         label: `${onMarker}On`,
@@ -1020,7 +1019,7 @@ export function App({
       },
     ]
     const answer = await askQuestion(
-      `Extended thinking is currently **${current ? 'on' : 'off'}**. Pick a mode (${GLYPH_BULLET} = current):`,
+      `Extended thinking is currently **${current ? 'on' : 'off'}**. Pick a mode (● = current):`,
       choices,
       { noOther: true },
     )

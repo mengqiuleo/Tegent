@@ -25,14 +25,6 @@ import type { InputHistoryEntry } from '../input-history.js'
 // 大段粘贴折叠成引用本期先不做；恢复该功能时再打开这些 helper。
 // import { expandPasteRefs, formatPasteRef, stripTrailingRef } from '../paste-refs.js'
 import type { PastedContents } from '../paste-refs.js'
-import {
-  GLYPH_BULLET,
-  GLYPH_PLAN_MODE,
-  GLYPH_SELECT_POINTER,
-  GLYPH_TODO_CHECK,
-  GLYPH_TODO_IN_PROGRESS,
-  GLYPH_TODO_PENDING,
-} from '../terminal-glyphs.js'
 import { formatTokenCount, getToolInputPreview, getToolLabel } from '../utils.js'
 import { inputReducer } from './chat-input/reducer.js'
 import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
@@ -252,7 +244,7 @@ function ToolResult({ toolCall }: { toolCall: DisplayToolCall }) {
     <Box flexDirection="column">
       <Text color={color}>
         {' '}
-        {GLYPH_BULLET} {label}
+        {'●'} {label}
         {preview ? `(${preview})` : ''}
       </Text>
       {output ? <Text color={toolCall.status === 'error' ? 'red' : 'gray'}> ⎿ {output}</Text> : null}
@@ -281,7 +273,7 @@ function ActiveTools({ tools }: { tools: readonly ActiveToolCall[] }) {
           <Box key={tool.id} flexDirection="column">
             <Text color="yellow">
               {' '}
-              {GLYPH_BULLET} {label}
+              {'●'} {label}
               {preview ? `(${preview})` : ''}
             </Text>
             <Text color="gray"> ⎿ {tool.progress ?? 'Running...'}</Text>
@@ -308,10 +300,10 @@ function Todos({ todos }: { todos: readonly TodoItem[] }) {
         // 根据 todo 状态选择对应图标：完成、进行中、待开始。
         const glyph =
           todo.status === 'completed'
-            ? GLYPH_TODO_CHECK
+            ? '✓'
             : todo.status === 'in_progress'
-              ? GLYPH_TODO_IN_PROGRESS
-              : GLYPH_TODO_PENDING
+              ? '◼'
+              : '◻'
         // 完成用绿色，进行中用黄色，待开始用灰色。
         const color = todo.status === 'completed' ? 'green' : todo.status === 'in_progress' ? 'yellow' : 'gray'
         return (
@@ -351,7 +343,7 @@ function PermissionDialog({ permission, selected }: { permission: PermissionRequ
       <Box flexDirection="column" marginTop={1}>
         {choices.map((choice, idx) => (
           <Text key={choice} color={idx === selected ? 'cyan' : undefined}>
-            {idx === selected ? GLYPH_SELECT_POINTER : ' '} {choice}
+            {idx === selected ? '❯' : ' '} {choice}
           </Text>
         ))}
       </Box>
@@ -387,7 +379,7 @@ function SelectDialog({
           <Box key={`${opt.label}-${idx}`} flexDirection="column">
             <Text color={idx === selected ? 'cyan' : undefined}>
               {/* 当前选中项用指针标记，其余项用空格保持对齐。 */}
-              {idx === selected ? GLYPH_SELECT_POINTER : ' '} {opt.label}
+              {idx === selected ? '❯' : ' '} {opt.label}
               {/* compact 布局把描述放在同一行，节省垂直空间。 */}
               {request.layout === 'compact' && opt.description ? <Text color="gray"> {opt.description}</Text> : null}
             </Text>
@@ -466,7 +458,7 @@ function CompletionMenu({
       {rows.slice(0, MAX_VISIBLE_MENU_ITEMS).map((row, idx) => (
         <Text key={row.key} color={idx === selected ? 'cyan' : undefined}>
           {/* 当前选中项用指针提示；其它项前面放空格保持列对齐。 */}
-          {idx === selected ? GLYPH_SELECT_POINTER : ' '} {row.title}
+          {idx === selected ? '❯' : ' '} {row.title}
           {row.suffix ? <Text color="gray"> {row.suffix}</Text> : null}
           {row.description ? <Text color="gray"> {row.description}</Text> : null}
         </Text>
@@ -494,7 +486,7 @@ function Footer({
 }) {
   // 根据权限模式生成左侧模式提示；default 模式不展示额外文案。
   const modeText =
-    permissionMode === 'plan' ? `${GLYPH_PLAN_MODE} plan mode` : permissionMode === 'acceptEdits' ? 'accept edits' : ''
+    permissionMode === 'plan' ? '⏸ plan mode' : permissionMode === 'acceptEdits' ? 'accept edits' : ''
   // 有上下文窗口信息时展示 used/window 和百分比。
   const usageText = contextUsage
     ? `${formatTokenCount(contextUsage.used)} / ${formatTokenCount(contextUsage.window)} · ${Math.round(
