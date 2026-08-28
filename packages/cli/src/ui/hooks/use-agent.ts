@@ -34,7 +34,7 @@ import type {
 import { isCollapsibleReadOnlyTool } from '../utils.js'
 import { useAgentDisplayHelpers } from './use-agent-display-helpers.js'
 import { modelMessagesToDisplay, previewSubInput } from './use-agent-display.js'
-import { extractLastAssistantText } from './use-stream-buffer.js'
+import { extractLastAssistantText } from '../utils/toolkit.js'
 
 export interface PendingPermission {
   /** core 发起的工具调用 id；用户选择授权后要用它对应回正在等待的那次调用。 */
