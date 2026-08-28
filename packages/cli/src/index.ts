@@ -142,7 +142,6 @@ async function gracefulShutdown(exitCode: number): Promise<never> {
   printResumeHint()
   //  按传入的退出码真正结束 Node 进程。
   process.exit(exitCode)
-  //  结束当前代码块。
 }
 
 //  主函数：CLI 的核心启动流程。
@@ -179,8 +178,7 @@ async function main() {
     //  退出码用 0：这只是一个用户配置提示，不是崩溃。
     // 如果用非 0，会让 `pnpm dev` 堆出 ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL / ELIFECYCLE 噪音。
     //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
-    process.exit(0)
-    //  结束当前代码块。
+    process.exit(0)  
   }
 
   //  解析模型 id（格式是 `provider:model`，比如 `anthropic:claude-...`）
@@ -192,7 +190,6 @@ async function main() {
     printNoApiKeyMessage()
     //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
     process.exit(0)
-    //  结束当前代码块。
   }
 
   //  防范「过期模型 id」——即当前启动没有注册该供应商的情况。
@@ -218,7 +215,6 @@ async function main() {
       printNoApiKeyMessage()
       //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
       process.exit(0)
-      //  结束当前代码块。
     }
     //  开始向 stderr 打印错误或提示信息。
     console.error(
@@ -234,7 +230,6 @@ async function main() {
     )
     //  把当前模型 id 改成回退供应商的默认模型。
     modelId = fallback.defaultModel
-    //  结束当前代码块。
   }
 
   //  创建各注册表，并从模型注册表拿到具体的模型实例。
@@ -263,8 +258,7 @@ async function main() {
   //  遍历插件加载错误，把每个错误展示给用户。
   for (const e of pluginLoad.registry.loadErrors()) {
     //  向标准错误输出打印信息。
-    console.error(chalk.yellow(`[plugin] ${e.id ?? e.path}: ${e.message}`))
-    //  结束当前代码块。
+    console.error(chalk.yellow(`[plugin] ${e.id ?? e.path}: ${e.message}`)) 
   }
   //  把插件加载结果整合成后续注册表可消费的结构。
   const pluginIntegration = await buildPluginIntegration(pluginLoad)
@@ -275,9 +269,7 @@ async function main() {
     for (const e of pluginIntegration.mcpErrors) {
       //  向标准错误输出打印信息。
       console.error(chalk.yellow(`[plugin] ${e.pluginId}: ${e.message}`))
-      //  结束当前代码块。
     }
-    //  结束当前代码块。
   }
 
   //  创建三个注册表，都把插件提供的额外目录（extraDirs）合并进来：
@@ -336,15 +328,12 @@ async function main() {
     for (const e of mcpLoadResult.configErrors) {
       //  向标准错误输出打印信息。
       console.error(chalk.yellow(`[mcp] config error in ${e.name}: ${e.message}`))
-      //  结束当前代码块。
     }
-    //  结束当前代码块。
   }
   //  如果项目级 MCP 因未信任而被跳过，就提示用户。
   if (mcpLoadResult.projectSkipped) {
     //  向标准错误输出打印信息。
     console.error(chalk.yellow(`[mcp] Project-level MCP servers skipped (not trusted).`))
-    //  结束当前代码块。
   }
   //  预加载「始终允许」列表，这样第一次工具调用就不用承担读文件的延迟。
   //  预加载 MCP 权限数据，减少第一次工具调用时的等待。
@@ -384,7 +373,6 @@ async function main() {
     commandRegistry,
     //  把插件钩子总线交给 agent 引擎。
     hookBus: pluginIntegration.hookBus,
-    //  结束当前代码块。
   }
 
   //  插件 SessionStart（会话开始）钩子。在 CLI 启动时触发，
@@ -401,7 +389,6 @@ async function main() {
       .emit({ name: 'SessionStart', session: { cwd: process.cwd(), modelId } })
       //  如果前面的异步链失败，就在这里处理错误。
       .catch((err) => {})
-    //  结束当前代码块。
   }
 
   //  会话恢复不通过命令行参数入口——要继续历史会话，
@@ -415,7 +402,6 @@ async function main() {
   if (!process.env.TAVILY_API_KEY && !process.env.BRAVE_API_KEY) {
     //  打印 WebSearch 缺少 key 的非致命提示。
     printNoWebSearchKeyHint()
-    //  结束当前代码块。
   }
 
   //  启动主应用（挂载 Ink TUI）。waitUntilExit 在 Ink 卸载时 resolve（包括 Ctrl+C 触发的卸载）。
@@ -428,7 +414,6 @@ async function main() {
   //  正常退出路径（包括 Ctrl+C，它会先卸载 Ink）。
   //  TUI 正常结束后，用退出码 0 走统一清理流程。
   await gracefulShutdown(0)
-  //  结束当前代码块。
 }
 
 //  从当前工作目录加载 .env 文件（逐层往上目录找，和 dotenv 的约定一致）。
@@ -450,11 +435,9 @@ function loadEnvFile(): void {
         //  开始 catch 块；如果恢复终端失败，就在这里吞掉异常。
       } catch {
         //  解析出错就忽略（比如 .env 文件格式不对）
-        //  结束当前代码块。
       }
       //  从当前函数返回，结束后续执行。
       return
-      //  结束当前代码块。
     }
     //  取得当前目录的父目录，下一轮循环会继续往上找。
     const parent = path.dirname(dir)
@@ -463,9 +446,7 @@ function loadEnvFile(): void {
     //  已经到根目录了，停止
     //  把搜索目录移动到父目录。
     dir = parent
-    //  结束当前代码块。
   }
-  //  结束当前代码块。
 }
 
 //  启动阶段（Ink 挂载之前）用的「朴素终端」提问函数。
@@ -491,7 +472,6 @@ async function askInTerminal(
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     //  返回前面算出的安全默认选项。
     return safeDefault
-    //  结束当前代码块。
   }
 
   //  动态导入 readline/promises，用它向用户提问并等待输入。
@@ -507,7 +487,6 @@ async function askInTerminal(
     const o = options[i]
     //  向标准错误输出写入文本。
     process.stderr.write(`  ${chalk.bold(`${i + 1}.`)} ${o.label} — ${chalk.gray(o.description)}\n`)
-    //  结束当前代码块。
   }
 
   //  用 readline 创建一个交互式问答，等用户输入编号
@@ -523,7 +502,6 @@ async function askInTerminal(
     if (Number.isFinite(idx) && idx >= 0 && idx < options.length) {
       //  返回用户选择的选项 label。
       return options[idx].label
-      //  结束当前代码块。
     }
     //  输入不合法就用安全默认值
     //  返回前面算出的安全默认选项。
@@ -532,9 +510,7 @@ async function askInTerminal(
   } finally {
     //  关闭 readline 接口，释放 stdin/stderr 相关资源。
     rl.close()
-    //  结束当前代码块。
   }
-  //  结束当前代码块。
 }
 
 // 拒绝（rejection）安全网。
@@ -550,7 +526,6 @@ process.on('unhandledRejection', (reason) => {
   if (process.env.DEBUG_STDOUT) {
     //  打印未处理 Promise 拒绝的调试信息。
     console.error('[unhandledRejection]', reason)
-    //  结束当前代码块。
   }
   //  结束当前函数调用或回调表达式。
 })
@@ -561,7 +536,6 @@ process.on('uncaughtException', (err) => {
   if (process.env.DEBUG_STDOUT) {
     //  打印未捕获异常的调试信息。
     console.error('[uncaughtException]', err)
-    //  结束当前代码块。
   }
   //  结束当前函数调用或回调表达式。
 })
@@ -590,7 +564,6 @@ process.on('SIGINT', () => {
     printResumeHint()
     //  用退出码 0 结束进程，表示正常退出或只是给用户提示。
     process.exit(0)
-    //  结束当前代码块。
   }
   //  结束当前函数调用或回调表达式。
 })
@@ -606,11 +579,9 @@ main().catch((err) => {
   if (sigintCount > 0 || shutdownInProgress) {
     //  从当前函数返回，结束后续执行。
     return
-    //  结束当前代码块。
   }
   //  打印真正的致命错误，方便用户或开发者定位问题。
   console.error('Fatal error:', err)
   //  用退出码 1 结束进程，表示发生了错误。
   process.exit(1)
-  //  结束当前函数调用或回调表达式。
 })
