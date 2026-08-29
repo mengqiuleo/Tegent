@@ -14,8 +14,8 @@ export interface McpStdioServerConfig {
 export interface McpHttpServerConfig {
   url: string
   /** 附加到每个请求的静态请求头，例如 `X-Custom: foo`。
-   *  OAuth 的 `Authorization: Bearer ...` 会自动添加；
-   *  不要把 access token 写在这里，应通过 OAuth 流程保存。 */
+   *  需要认证的服务器在这里配置 `Authorization: Bearer <token>`；
+   *  值支持 `${VAR}` 环境变量展开，token 轮换时无需改动配置文件。 */
   headers?: Record<string, string>
   timeout?: number
   enabled?: boolean
@@ -47,7 +47,6 @@ export type McpServerStatus =
   | { kind: 'disabled' }
   | { kind: 'connecting' }
   | { kind: 'connected'; toolCount: number; resourceCount: number }
-  | { kind: 'needs_auth'; authUrl?: string }
   | { kind: 'failed'; error: string }
 
 /**

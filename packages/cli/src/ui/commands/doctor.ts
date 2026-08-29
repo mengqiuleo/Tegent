@@ -79,8 +79,6 @@ export function createDoctorCommandHandler(deps: DoctorCommandDeps) {
             if (s.stderrTail) {
               lines.push(`  stderr: ${s.stderrTail.slice(0, 120)}`)
             }
-          } else if (kind === 'needs_auth') {
-            lines.push(`- ${s.name}: ⚠ needs authentication — run \`/mcp auth ${s.name}\``)
           } else if (kind === 'disabled') {
             lines.push(`- ${s.name}: — disabled`)
           } else {

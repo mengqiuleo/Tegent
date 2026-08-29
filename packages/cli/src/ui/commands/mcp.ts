@@ -3,14 +3,13 @@
 // prompt-cache invalidator, plus the four UI-side hooks (addCommandMessage,
 // addCommandResult, askQuestion).
 //
-// Subcommands: list / tools / auth / logout / refresh / add / add-json /
-// remove. Add/Remove use --scope=user|project; --scope project auto-trusts
+// Subcommands: list / tools / refresh / add / add-json / remove.
+// Add/Remove use --scope=user|project; --scope project auto-trusts
 // the project for next launch.
 import {
   detectScope,
   getMcpConfigPath,
   getPluginMcpServersFromDisk,
-  getTokenStorage,
   loadMergedConfigsFromDisk,
   parseAdd,
   parseAddJson,
@@ -236,7 +235,6 @@ export function createMcpCommandHandler(deps: McpCommandDeps) {
       [
         `Removed "${name}" from ${scope} scope (${result.path}).`,
         'Current session unchanged — the running server (if any) keeps working until xc exits.',
-        `Stored OAuth tokens (if any) kept — run /mcp logout ${name} to clear them too.`,
       ].join('\n'),
     )
   }
@@ -269,9 +267,6 @@ export function createMcpCommandHandler(deps: McpCommandDeps) {
             case 'connecting':
               badge = 'connecting…'
               break
-            case 'needs_auth':
-              badge = `needs auth — run /mcp auth ${s.name} to log in`
-              break
             case 'failed':
               badge = `failed — ${s.status.error}`
               break
@@ -294,85 +289,6 @@ export function createMcpCommandHandler(deps: McpCommandDeps) {
           lines.push(`  ${t.callableName}${desc}`)
         }
         addCommandMessage(text, lines.join('\n'))
-        return
-      }
-      case 'auth': {
-        if (!subArg) {
-          addCommandMessage(text, 'Usage: /mcp auth <server-name>')
-          return
-        }
-        if (!registry) {
-          addCommandMessage(text, 'No MCP servers configured. Add `mcpServers` to ~/.tegent/config.json first.')
-          return
-        }
-        const config = registry.getConfig(subArg)
-        if (!config) {
-          addCommandMessage(text, `Unknown MCP server: "${subArg}". Run /mcp list to see configured servers.`)
-          return
-        }
-        if (!('url' in config) || typeof config.url !== 'string') {
-          addCommandMessage(
-            text,
-            `MCP server "${subArg}" is a stdio server — OAuth applies to HTTP servers (those with a "url" field) only.`,
-          )
-          return
-        }
-        // Drop stored tokens up front. If the user runs /mcp auth on a
-        // server with valid tokens, we want a forced re-auth (matches
-        // Gemini CLI semantics — running auth again is a "let me log in
-        // from scratch", not "verify my existing session"). A separate
-        // /mcp logout exists for users who just want to clear without
-        // re-authing.
-        try {
-          await getTokenStorage().clear(subArg)
-        } catch {
-          // best-effort; an unwritable token store still lets the rest
-          // of the flow run and the user will see the actual failure
-          // when finishAuth tries to save.
-        }
-        addCommandMessage(text, `Authenticating "${subArg}" — opening browser...`)
-        try {
-          const server = await registry.authenticateServer(subArg, {
-            onBrowserOpen: (url) => {
-              addCommandResult(`Opened ${url}\nWaiting for the authorization redirect...`)
-            },
-          })
-          if (server.status.kind === 'connected') {
-            // Tool surface may have grown — invalidate cache so the next
-            // turn rebuilds the system prompt with the newly-available
-            // tools.
-            invalidateSystemPromptCache()
-            addCommandResult(
-              `✓ Authenticated "${subArg}" — ${server.status.toolCount} tool${
-                server.status.toolCount === 1 ? '' : 's'
-              }, ${server.status.resourceCount} resource${server.status.resourceCount === 1 ? '' : 's'}`,
-            )
-          } else if (server.status.kind === 'needs_auth') {
-            addCommandResult(`⚠ Server still needs auth. The browser flow may have been cancelled.`)
-          } else if (server.status.kind === 'failed') {
-            addCommandResult(`✗ Auth completed but server failed to connect: ${server.status.error}`)
-          } else {
-            addCommandResult(`Server is now in state: ${server.status.kind}`)
-          }
-        } catch (err) {
-          addCommandResult(`✗ Authentication failed: ${err instanceof Error ? err.message : String(err)}`)
-        }
-        return
-      }
-      case 'logout': {
-        if (!subArg) {
-          addCommandMessage(text, 'Usage: /mcp logout <server-name>')
-          return
-        }
-        try {
-          await getTokenStorage().clear(subArg)
-          addCommandMessage(
-            text,
-            `Removed stored OAuth tokens for "${subArg}". Run /mcp auth ${subArg} to log in again.`,
-          )
-        } catch (err) {
-          addCommandMessage(text, `Failed to clear tokens: ${err instanceof Error ? err.message : String(err)}`)
-        }
         return
       }
       case 'refresh': {
@@ -429,7 +345,7 @@ export function createMcpCommandHandler(deps: McpCommandDeps) {
       default: {
         addCommandMessage(
           text,
-          `Unknown subcommand: /mcp ${sub}. Available: list, tools, add, add-json, remove, auth, logout, refresh.`,
+          `Unknown subcommand: /mcp ${sub}. Available: list, tools, add, add-json, remove, refresh.`,
         )
         return
       }

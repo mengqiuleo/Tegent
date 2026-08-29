@@ -9,13 +9,11 @@ import {
   buildPluginIntegration,
   createCommandRegistry,
   createModelRegistry,
-  createOAuthProviderFactory,
   createSkillRegistry,
   createSubAgentRegistry,
   ensureDefaultMarketplaces,
   getAvailableProviders,
   getEnvVarName,
-  getTokenStorage,
   loadAllPlugins,
   loadMcpFromDisk,
   loadUserConfig,
@@ -285,8 +283,6 @@ async function main() {
   // 这要在 Ink 挂载之前做，这样基于 readline 的信任提示能有一个干净的终端。
   // MCP 机制是「可选」的：配置里没有 mcpServers 的用户只会付出一次 fs.stat 的代价
   // （用户配置一次、项目配置一次），仅此而已。
-  //  取得 OAuth 令牌存储，供 MCP 授权流程使用。
-  const tokenStorage = getTokenStorage()
   //  创建 MCP 权限存储实例。
   const mcpPermissionStore = new McpPermissionStore()
   //  从磁盘加载 MCP 配置、启动服务器，并得到加载结果。
@@ -297,18 +293,6 @@ async function main() {
     extraServers: pluginIntegration.mcpServers,
     //  把启动阶段的终端提问函数交给 MCP 加载器使用。
     askUser: (question, opts) => askInTerminal(question, opts),
-    //  这个「打开浏览器」钩子只在 /mcp auth（MCP 授权）期间触发
-    // （被动启动模式从不调用 redirectToAuthorization）。
-    // App.tsx 里的 /mcp auth 处理器已经通过 addCommandResult 展示了这个 URL；
-    // 如果在这里再用 console.error 写一份，会落到 stderr，
-    // 破坏 ChatInput 的单元格帧（`[` 字符会和输入框底部分隔线冲突）。
-    // 所以发到 debug log，这样仍然可以被技术支持找回。
-    //  创建 MCP OAuth provider，并把打开浏览器的 URL 记录到调试日志。
-    oauthProviderFor: createOAuthProviderFactory(tokenStorage, (server, url) => {
-      //  记录 MCP 授权需要打开的浏览器 URL。
-
-      //  结束当前回调或函数调用。
-    }),
     //  把 MCP 加载器请求退出时的处理方式设为正常退出进程。
     onExitRequested: () => process.exit(0),
   })
