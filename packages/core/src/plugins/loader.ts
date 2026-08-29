@@ -110,14 +110,14 @@ export async function loadAllPlugins(opts: LoadOptions): Promise<LoadResult> {
   const enableState = await EnableState.load(opts.cwd)
   const plugins: LoadedPlugin[] = []
   const errors: PluginLoadError[] = []
-  const contributions = new Map<string, ResolvedContributions>()
+  const contributions = new Map<string, ResolvedContributions>() // plugin id -> 贡献项解析结果（结果其实就是 plugin.json，要求 plugin.json 中的路径均为绝对路径）
 
   // ── 第 1 轮：user-scope 已安装插件 ───────────────────────────────────
   const installed = await listInstalledPlugins()
   for (const record of installed) {
     const rootDir = pluginCacheDir(record.marketplace, record.name, record.version)
-    await loadOnePlugin({
-      rootDir,
+    await loadOnePlugin({ // 插件加载，
+      rootDir, // 读取的是 cache 目录的路径
       fallbackId: record.id,
       marketplace: record.marketplace,
       scope: record.installScope,

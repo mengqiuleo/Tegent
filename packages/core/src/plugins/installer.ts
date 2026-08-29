@@ -17,9 +17,6 @@
 //
 // AbortSignal 会贯穿 git clone（通过 execa 的 `signal`）和递归复制（每个目录项之间
 // 协作式检查），因此长安装过程中按 Esc 可以干净取消正在进行的工作。
-//
-// 缓存布局刻意按版本分目录，未来 `/plugin update` 可以并排安装新版本并原子切换；
-// 当前实现只覆盖同版本安装。
 import { execa } from 'execa'
 
 import fs from 'node:fs/promises'
@@ -184,8 +181,7 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
     // ── 授权门禁 ──
     // 授权预览基于已解析 manifest 构建，调用方可以展示插件将贡献的内容
     // （hooks、mcp、作用域等），并显式询问用户。callback 缺失时跳过提示是有意为之：
-    // 非交互路径和 CLI `--yes` 都通过不传 `consent` 实现。
-    if (req.consent) {
+    if (req.consent) { // 目前 cli 中均未传值，即都不需要确认
       const rootProbe = await probePluginRoot(tempDir)
       const preview = buildConsentPreview({
         pluginId: `${manifest.name}@${req.marketplace}`,
@@ -204,10 +200,8 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
 
     // ── userConfig 提示（授权之后，提交缓存之前） ──
     // 只有 manifest 声明 userConfig 字段且调用方传入 prompt callback 时才触发。
-    // 非交互路径（--yes、CI）会跳过提示，字段保持未设置；插件在 hook / mcp 启动时
-    // 会看到空 env，和引入该功能前的行为一致。
-    // prompt 返回 null 会中止安装，按拒绝授权处理；非 null 对象会通过
-    // setPluginUserConfig 持久化。
+    // 插件在 hook / mcp 启动时会看到空 env，和引入该功能前的行为一致。
+    // prompt 返回 null 会中止安装，按拒绝授权处理；非 null 对象会通过 setPluginUserConfig 持久化。
     if (manifest.userConfig && manifest.userConfig.length > 0 && req.userConfigPrompt) {
       const collected = await req.userConfigPrompt(manifest.userConfig)
       if (collected === null) {
@@ -266,14 +260,15 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
  * @throws InstallError 来源不可用、clone 失败、subdir 缺失或 sha 校验失败时抛出。
  */
 async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<string> {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'xc-plugin-install-'))
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tegent-plugin-install-'))
+// tempDir: /var/folders/q_/tspbmdf172z9j8hfs47zr8lm0000gp/T, Windows 是 %LOCALAPPDATA%\Temp
 
   if (source.kind === 'local') {
-    const resolved = path.resolve(source.path)
-    const stat = await fs.stat(resolved).catch(() => null)
+    const resolved = path.resolve(source.path) // 拿到绝对路径，source.path 可能是 ./
+    const stat = await fs.stat(resolved).catch(() => null) // fs.stat 获取文件的详细信息
     if (!stat || !stat.isDirectory()) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
-      // 错误中展示 cwd：相对路径会基于 process.cwd() 解析；当 xc 通过 `pnpm dev`
+      // 错误中展示 cwd：相对路径会基于 process.cwd() 解析；当 tegent 通过 `pnpm dev`
       // 启动时 cwd 可能是 `packages/cli/` 而不是仓库根目录。用户在 slash command
       // 中输入 `./foo` 时容易被这个差异困住，同时展示解析后的绝对路径和 cwd
       // 能让原因更明显。
@@ -353,7 +348,7 @@ async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
         throw new InstallError(`subdir "${subdir}" not found in cloned repo ${cloneUrl}`)
       }
-      const subdirTemp = await fs.mkdtemp(path.join(os.tmpdir(), 'xc-plugin-subdir-'))
+      const subdirTemp = await fs.mkdtemp(path.join(os.tmpdir(), 'tegent-plugin-subdir-'))
       try {
         await copyDirFiltered(subdirPath, subdirTemp, signal)
       } catch (err) {
@@ -552,7 +547,7 @@ export async function uninstallPlugin(id: string): Promise<UninstallResult> {
       result.removedVersions = versions
       await fs.rm(parent, { recursive: true, force: true })
     } catch {
-      // 没有缓存条目时，账本记录可能已经过期；下面仍会尝试移除账本记录。
+
     }
   }
 

@@ -1,4 +1,4 @@
-// `/plugin refresh` 会进入这个模块。它的职责是在不重启 xc 的前提下重新扫描磁盘上
+// `/plugin refresh` 会进入这个模块。它的职责是在不重启 tegent 的前提下重新扫描磁盘上
 // 的已安装插件，并把新的插件状态传播给所有下游 registry。
 //
 // 为什么它是独立模块，而不是 PluginRegistry 的一个方法：
@@ -10,8 +10,7 @@
 // 当调用方同时传入 mcpRegistry 和 askUser callback 时，这里也会重启 MCP servers；
 // askUser 是项目信任门禁检查所必需的。插件贡献的 MCP servers 会和 user / project
 // servers 合并，然后整体走 `McpRegistry.restartAll(...)`，也就是 `/mcp refresh`
-// 使用的同一路径。没有传 mcpRegistry 的调用方则保持旧行为，只刷新
-// skill/agent/command/hook。
+// 使用的同一路径。没有传 mcpRegistry 的调用方则保持旧行为，只刷新 skill/agent/command/hook。
 import { reloadSubAgentRegistry } from '../agent/sub-agents/registry.js'
 import type { SubAgentRegistry, SubAgentReloadSummary } from '../agent/sub-agents/registry.js'
 import { reloadCommandRegistry } from '../commands/registry.js'

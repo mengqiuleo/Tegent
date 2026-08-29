@@ -18,7 +18,7 @@ const PLUGINS_DIR_NAME = 'plugins'
 /**
  * 返回插件子系统的根目录。
  *
- * @returns 插件根目录的绝对路径或用户提供的覆盖路径。
+ * @returns 插件根目录的绝对路径或用户提供的覆盖路径。 `~/.tegent/plugins/` 
  */
 export function pluginsRoot(): string {
   return path.join(userTeCodeDir(), PLUGINS_DIR_NAME)
@@ -64,7 +64,7 @@ export function marketplaceIndexPath(name: string): string {
  * @returns `~/.tegent/plugins/cache/<marketplace>/<plugin>/`。
  */
 export function pluginCacheParent(marketplace: string, plugin: string): string {
-  return path.join(pluginsRoot(), 'cache', marketplace, plugin)
+  return path.join(pluginsRoot(), 'cache', marketplace, plugin) // 因为 cache/<marketplace>/<plugin>/<version>/
 }
 
 /**

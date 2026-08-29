@@ -13,9 +13,7 @@
 //     这一点对 Windows 很重要，因为用户常会贴出 `D:\res\tegent-cli\tmp`
 //     这类路径；如果按完整 POSIX 规则吃掉反斜杠，就会悄悄把路径改坏。
 //   - 其他情况下一律按空白切 token
-//
-// 不依赖 shell-words 之类的 npm 包，是因为这里的输入面很小，
-// 用一个 50 行左右的 tokenizer 更容易保持确定性，也更容易测试。
+
 import type { McpHttpServerConfig, McpServerConfig, McpStdioServerConfig } from './types.js'
 
 export type ConfigScope = 'user' | 'project'
@@ -63,10 +61,32 @@ const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/
 /**
  * 解析 `/mcp add [...flags] <name> <command-or-url> [args...]`。
  *
+ * 输入里有两类东西：
+ *   - flag（选项）：以 `-` 开头的参数，描述“怎么配置/存到哪”，
+ *     如 --scope、--env、--header、--timeout、--http。只能出现在 name 之前。
+ *   - 位置参数：按出现顺序解释，共三种角色：
+ *       name    = 服务器名，写入配置后成为 mcpServers.<name> 的键，与进程启动无关；
+ *       command = stdio 模式下要启动的程序（如 npx）；HTTP 模式下这个位置是 url；
+ *       args    = command 后面的所有 token，原样作为程序的命令行参数。
+ *
+ * 两种用法，对应 MCP 的两种传输方式：
+ *
+ *   stdio（本地子进程，默认）：
+ *     /mcp add [--scope ...] [--env K=V]... [--timeout N] <name> <command> [args...]
+ *     例：/mcp add fs npx -y @modelcontextprotocol/server-filesystem /tmp
+ *       → name='fs', command='npx', args=['-y','@modelcontextprotocol/server-filesystem','/tmp']
+ *       → 运行效果等价于在终端执行 `npx -y @modelcontextprotocol/server-filesystem /tmp`
+ *
+ *   HTTP（远程服务）：
+ *     /mcp add --http [--scope ...] [--header "K: V"]... [--timeout N] <name> <url>
+ *     例：/mcp add --http api https://example.com/mcp
+ *
  * @param rawArg `add` 子命令后面的原始参数串。
  * @returns 解析成功则返回 add 命令；失败则返回错误消息。
  */
 export function parseAdd(rawArg: string): ParseResult<AddCommand> {
+  // 第 0 步：把原始字符串切成 token 数组（引号内的空白不会被切开）。
+  // 例：'--env K=V fs npx -y @pkg/foo' → ['--env','K=V','fs','npx','-y','@pkg/foo']
   const tokRes = tokenize(rawArg)
   if (!tokRes.ok) return tokRes
   const tokens = tokRes.tokens
@@ -74,14 +94,16 @@ export function parseAdd(rawArg: string): ParseResult<AddCommand> {
   // 第一轮：先把前面的 flag 解析出来。
   // 遇到第一个非 flag token 就停下，它会变成服务器名；
   // `--` 会硬停止 flag 解析，然后被丢掉，后面的内容全部按位置参数处理。
-  let isHttp = false
-  let scope: ConfigScope = 'user'
-  let timeout: number | undefined
-  const envEntries: Array<[string, string]> = []
-  const headerEntries: Array<[string, string]> = []
+  // 必须在 name 处停下的原因：`npx -y ...` 里的 `-y` 是给 npx 的参数，
+  // 不是我们的 flag；提前停才能让它原样进入 args。
+  let isHttp = false // 走哪种传输：true=HTTP 远程服务器；false=stdio 本地子进程（默认）
+  let scope: ConfigScope = 'user' // 配置写到哪里：'user'=用户级全局配置，'project'=当前项目配置
+  let timeout: number | undefined // --timeout 传入的超时毫秒数；没传就保持 undefined，不写进 config
+  const envEntries: Array<[string, string]> = [] // 收集所有 --env K=V，最后合成 config.env（仅 stdio 合法）
+  const headerEntries: Array<[string, string]> = [] // 收集所有 --header "K: V"，最后合成 config.headers（仅 HTTP 合法）
 
-  let i = 0
-  let sawDoubleDash = false
+  let i = 0 // 游标：当前读到的 token 下标；循环结束时正好指向第一个位置参数（name）
+  let sawDoubleDash = false // 是否遇到过 `--`（仅作记录，下面用 void 显式忽略）
   while (i < tokens.length) {
     const t = tokens[i]!
     if (!t.startsWith('-')) break // 第一个位置参数
@@ -157,6 +179,8 @@ export function parseAdd(rawArg: string): ParseResult<AddCommand> {
   // 有些用户会带着 Claude Code 的肌肉记忆写成 `add <name> -- <cmd>`，
   // 也就是把分隔符放在 name 后面。上面的 flag 循环已经会在第一个非 flag
   // 处停下，所以这里如果看到 `--`，就把它当成纯装饰直接丢掉。
+  // 第二轮：flag 之后的剩余 token，按“位置”而不是“名字”解释：
+  //   positional[0] = name，positional[1] = command（stdio）或 url（http），positional[2..] = args
   let positional = tokens.slice(i)
   if (positional[1] === '--') {
     positional = [positional[0]!, ...positional.slice(2)]
@@ -168,18 +192,22 @@ export function parseAdd(rawArg: string): ParseResult<AddCommand> {
         : 'Usage: /mcp add [--scope user|project] [--env K=V]... [--timeout N] <name> <command> [args...]',
     )
   }
+  // name：服务器名。它只是配置里的一个“键”，不参与进程启动；
+  // 写入配置后就是 mcpServers.<name>，用户以后通过它引用这台服务器。
   const name = positional[0]!
   if (!NAME_RE.test(name)) {
     return err(`Invalid server name "${name}". Must match ${NAME_RE.source}.`)
   }
 
+  // 加了 --http 时，第二个位置参数是 url 而不是 command，后面不许再有任何参数，解析后直接 return
   if (isHttp) {
     if (positional.length > 2) {
       return err('HTTP servers take only <name> <url> — no extra positional args')
     }
     if (envEntries.length > 0) return err('--env is only valid for stdio servers')
-    const url = positional[1]!
+    const url = positional[1]! // 远程 MCP 服务器的 http(s) 地址；HTTP 模式下没有 command/args
     if (!isValidUrl(url)) return err(`Invalid URL: ${url}`)
+    // HTTP 服务器的最终配置：一个 URL + 可选的请求头/超时。
     const config: McpHttpServerConfig = {
       url,
       ...(headerEntries.length > 0 ? { headers: Object.fromEntries(headerEntries) } : {}),
@@ -194,8 +222,14 @@ export function parseAdd(rawArg: string): ParseResult<AddCommand> {
   // 因为上面已经把 `--` 去掉了。
   void sawDoubleDash
   if (headerEntries.length > 0) return err('--header is only valid for HTTP servers (--http)')
+  // command：实际要启动的可执行程序，如 'npx' / 'node' / 'python'。
+  // args：它后面的所有 token，原样作为程序的命令行参数。
+  // 例：`add fs npx -y @pkg/foo /tmp`
+  //   → command = 'npx'，args = ['-y', '@pkg/foo', '/tmp']
+  //   → 运行效果等价于 spawn('npx', ['-y', '@pkg/foo', '/tmp'])
   const command = positional[1]!
   const args = positional.slice(2)
+  // stdio 服务器的最终配置：子进程启动后通过 stdin/stdout 与我们通信。
   const config: McpStdioServerConfig = {
     command,
     ...(args.length > 0 ? { args } : {}),

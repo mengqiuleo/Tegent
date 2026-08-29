@@ -1,5 +1,6 @@
 // 本模块从不同作用域的 settings.json 文件中读取 `enabledPlugins` 映射，
 // 并为每个 plugin id 解析出最终生效的启用状态。
+// 并提供功能函数：改写 settings.json 中的单个插件启用标记，或启用后将单个插件记录从 settings.json 中清理掉。
 //
 // 当前是两级作用域模型，和 MCP、skill 子系统保持一致：
 //
@@ -126,7 +127,7 @@ export class EnableState {
    * @param pluginId 形如 `name@marketplace` 的插件 ID。
    * @returns 启用状态，以及决定该状态的作用域。
    */
-  resolve(pluginId: string): ResolvedEnableState {
+  resolve(pluginId: string): ResolvedEnableState { // 为什么这里直接用 pluginId 查找，因为在 plugin install 时就约束了格式为 `name@marketplace`
     for (const scope of SCOPE_PRECEDENCE) {
       const table = this.perScope.get(scope) ?? {}
       if (pluginId in table) {
