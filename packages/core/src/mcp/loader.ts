@@ -154,11 +154,7 @@ export async function loadMergedConfigsFromDisk(opts: {
   return { configs: merged, configErrors, projectSkipped }
 }
 
-/**
- * 纯 loader（不负责读取配置文件，调用方把配置注入进来）。
- *
- * 这样更容易测试，也让 CLI 自己控制配置来源。
- */
+
 export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> {
   const configErrors: Array<{ name: string; message: string }> = []
   let projectSkipped = false
