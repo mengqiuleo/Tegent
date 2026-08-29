@@ -96,9 +96,7 @@ export interface UserConfig {
   mcpServers?: Record<string, unknown>
 }
 
-/** Path to the user config file. Exposed so other modules that want to
- *  read the same JSON (e.g. the MCP loader for the `mcpServers` field)
- *  honour the X_CODE_HOME override automatically. */
+
 export function getUserConfigPath(): string {
   return userConfigPath()
 }
@@ -117,7 +115,6 @@ export function loadUserConfig(): UserConfig {
       return parsed as UserConfig
     }
   } catch {
-    // File may not exist yet, or is malformed — either way fall through to {}
   }
   return {}
 }
@@ -126,13 +123,9 @@ export function loadUserConfig(): UserConfig {
 export function saveUserConfig(update: Partial<UserConfig>): void {
   const merged: UserConfig = { ...loadUserConfig(), ...update }
   try {
-    // mkdir the SAME root userConfigPath() points at — otherwise an
-    // X_CODE_HOME override creates `~/.tegent/` but writes to the override
-    // and the write silently fails on a missing parent.
     fsSync.mkdirSync(userTeCodeDir(), { recursive: true })
     fsSync.writeFileSync(userConfigPath(), JSON.stringify(merged, null, 2) + '\n', 'utf-8')
   } catch {
-    // Best-effort: don't crash the UI if the config dir is read-only.
   }
 }
 

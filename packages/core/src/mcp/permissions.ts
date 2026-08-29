@@ -12,6 +12,10 @@ import path from 'node:path'
 
 import { userTeCodeDir } from '../utils.js'
 
+/**
+ * 
+ * @returns `~/.tegent/mcp-permissions.json`
+ */
 function permissionsFile(): string {
   return path.join(userTeCodeDir(), 'mcp-permissions.json')
 }

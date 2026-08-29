@@ -311,7 +311,6 @@ async function main() {
     }),
     //  把 MCP 加载器请求退出时的处理方式设为正常退出进程。
     onExitRequested: () => process.exit(0),
-    //  结束当前函数调用或回调表达式。
   })
   //  保存 MCP 注册表，用于退出时关闭。
   //  把 MCP 注册表保存到模块级变量，供退出清理时使用。

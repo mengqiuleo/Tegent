@@ -27,6 +27,9 @@ import path from 'node:path'
 
 import {  userTeCodeDir } from '../../utils.js'
 
+/** 
+ * @returns `~/.tegent/mcp-auth.json`
+ */
 function authFile(): string {
   return path.join(userTeCodeDir(), 'mcp-auth.json')
 }
@@ -85,7 +88,6 @@ export class McpTokenStorage {
     }))
   }
 
-  // ── 辅助方法 ──────────────────────────────────────────────────────────
 
   /**
    * 根据 issuedAt + expires_in 计算绝对过期时间。
@@ -115,7 +117,6 @@ export class McpTokenStorage {
     return Date.now() + skewMs < expiresAt
   }
 
-  // ── 内部实现 ──────────────────────────────────────────────────────────
 
   private async ensureLoaded(): Promise<void> {
     if (this.cache !== null) return
@@ -146,7 +147,7 @@ async function readFile(): Promise<FileShape> {
       return parsed as FileShape
     }
   } catch {
-    // 文件缺失或损坏时，从空状态开始。
+
   }
   return {}
 }
@@ -161,16 +162,6 @@ let globalInstance: McpTokenStorage | null = null
 export function getTokenStorage(): McpTokenStorage {
   if (!globalInstance) globalInstance = new McpTokenStorage()
   return globalInstance
-}
-
-/**
- * 测试钩子：替换单例，避免单元测试直接碰 ~/.tegent。
- *
- * 注意：X_CODE_HOME 也会重定向文件路径，所以大多数测试只要设置这个环境变量，
- * 就不用走这个钩子了。
- */
-export function setTokenStorageForTesting(s: McpTokenStorage | null): void {
-  globalInstance = s
 }
 
 export type { OAuthClientInformationFull, OAuthClientInformationMixed, OAuthTokens }

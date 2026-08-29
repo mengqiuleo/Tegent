@@ -152,17 +152,8 @@ export interface LoadCustomAgentsOptions {
   extraDirs?: ReadonlyArray<{ dir: string; pluginId: string }>
 }
 
-/** 从用户级目录、项目级目录，以及插件贡献目录加载自定义子代理。
- *
- * 测试时可以用环境变量 `XC_AGENTS_DIR` 覆盖内置路径；
- * 覆盖只影响用户/项目默认目录，插件 extraDirs 仍会照常加载。 */
+/** 从用户级目录、项目级目录，以及插件贡献目录加载自定义子代理。 */
 export async function loadCustomAgents(opts: LoadCustomAgentsOptions = {}): Promise<SubAgentDefinition[]> {
-  const override = process.env.XC_AGENTS_DIR
-  if (override) {
-    const overrideAgents = await loadAgentsFromDir(override, 'project')
-    return [...overrideAgents, ...(await loadAgentsFromExtras(opts.extraDirs))]
-  }
-
   const userDir = path.join(USER_TEGENT_DIR, 'agents')
   const projectDir = path.join(process.cwd(), TEGENT_DIR, 'agents')
 

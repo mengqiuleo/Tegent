@@ -229,20 +229,12 @@ export interface LoadSkillsOptions {
  * 加载当前会话可用的全部技能。
  *
  * 默认会按“用户级技能 → 插件技能 → 项目级技能”的顺序加载，最终注册表里同名技能由
- * 后面的来源覆盖。测试环境可以通过 `XC_SKILLS_DIR` 覆盖内置路径；额外目录仍然会被
- * 加载，以便测试插件技能的合并逻辑。
+ * 后面的来源覆盖。
  *
  * @param opts 技能加载选项，主要用于传入插件贡献的额外技能目录。
  * @returns 当前进程工作目录下可用的技能定义列表。
  */
 export async function loadSkills(opts: LoadSkillsOptions = {}): Promise<SkillDefinition[]> {
-  const override = process.env.XC_SKILLS_DIR
-  if (override) {
-    // 测试专用覆盖路径：把 override 当作项目级技能目录，仍然追加 extras。
-    const overrideSkills = await loadSkillsFromDir(override, 'project')
-    return [...overrideSkills, ...(await loadFromExtras(opts.extraDirs))]
-  }
-
   const userDir = path.join(USER_TEGENT_DIR, 'skills')
   const projectDir = path.join(process.cwd(), TEGENT_DIR, 'skills')
 
