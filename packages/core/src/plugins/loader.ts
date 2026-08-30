@@ -293,7 +293,7 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
     for (const conv of ['.mcp.json', 'mcp.json']) {
       const p = path.join(root, conv)
       if (await isFile(p)) {
-        result.mcpServers = { kind: 'path', path: p }
+        result.mcpServers = { kind: 'path', path: p } // path 一般为 `~/.tegent/plugins/<name>/mcp.json` 或 `<cwd>/.tegent/plugins/<name>/mcp.json`
         break
       }
     }
@@ -307,9 +307,9 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
       result.hooks = { kind: 'inline', data: m.hooks }
     }
   } else {
-    const conv = path.join(root, 'hooks', 'hooks.json')
+    const conv = path.join(root, 'hooks', 'hooks.json') 
     if (await isFile(conv)) {
-      result.hooks = { kind: 'path', path: conv }
+      result.hooks = { kind: 'path', path: conv } // path 一般为 `~/.tegent/plugins/<name>/hooks/hooks.json` 或 `<cwd>/.tegent/plugins/<name>/hooks/hooks.json`
     }
   }
 

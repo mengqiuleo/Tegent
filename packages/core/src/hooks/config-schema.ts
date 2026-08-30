@@ -4,7 +4,6 @@
 //
 // `matcher` 里的错误正则不会被视为 schema 错误。要求作者在 zod 严格模式下编写并
 // 测试正则会过于繁琐；总线会在 emit 时捕获 RegExp 构造错误，并降级为“匹配所有工具”，
-// 同时写入日志供排查。
 import { z } from 'zod'
 
 import type { HookConfig } from './types.js'
