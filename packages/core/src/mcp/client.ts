@@ -33,7 +33,7 @@ import {
  */
 const STDERR_TAIL_LINES = 20
 
-const CLIENT_INFO = { name: 'tegent-cli', version: VERSION }
+const CLIENT_INFO = { name: 'tegent', version: VERSION }
 
 /**
  * 首次连接默认超时，单位毫秒。
@@ -51,15 +51,36 @@ export interface ConnectInfo {
 }
 
 export class McpClient {
-  /** SDK Client 实例；只有成功进入连接流程后才存在。 */
+  // ── 内部状态 ────────────────────────────────────────────────────────
+  //
+  //   registry ──► McpClient（本类）
+  //                 ├── client    ：SDK Client，协议层 —— 会说 MCP
+  //                 │              协议（initialize 握手、listTools、
+  //                 │              callTool、readResource）
+  //                 └── transport ：SDK Transport，传输层 —— 只管消息
+  //                                怎么送达：stdio 型 = 子进程的
+  //                                stdin/stdout 管道；HTTP 型 = 网络请求
+  //
+  // client / transport 为 null 就表示“当前没有活跃连接”：构造后、
+  // connect() 前，以及 close() 之后都处于这个状态。
+
+  /** SDK 协议层：所有 MCP 调用（listTools / callTool / readResource）
+   *  都发给它。connect() 时创建，close() 时置回 null。 */
   private client: Client | null = null
-  /** SDK transport；由本类持有，以便 `close()` 时能干净释放。 */
+  /** SDK 传输层：stdio 型就是被拉起的子进程（持有它的 stdin/stdout
+   *  管道），HTTP 型是一条网络连接。单独存引用是为了 close() 时能
+   *  彻底释放（杀掉子进程 / 断开连接）。 */
   private transport: Transport | null = null
-  /** stderr 的滚动尾部缓存，仅 stdio 服务器会写入。 */
+  /** 子进程 stderr 的滚动缓冲：只保留最后 STDERR_TAIL_LINES 行，
+   *  每来一行就 push，超了就丢最旧的。仅 stdio 型写入（HTTP 没有
+   *  stderr）。连接失败时 enrichError 会取末尾几行拼进报错，
+   *  `/mcp list` 通过 stderr() 读它来展示失败原因。 */
   private stderrTail: string[] = []
-  /** 最近一次连接枚举出的工具缓存，供 registry 安装工具表。 */
+  /** connect() 时 listTools() 拉回的工具清单。之后 tools() 直接返回
+   *  这份缓存、不再发请求；registry 安装工具表时也读它。 */
   private cachedTools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }> = []
-  /** 最近一次连接枚举出的 resource 缓存，供 registry 安装 resource 表。 */
+  /** 同 cachedTools，但缓存的是 listResources() 拉回的 resource 清单，
+   *  供 resources() 和 registry 使用。 */
   private cachedResources: McpResourceEntry[] = []
 
   constructor(

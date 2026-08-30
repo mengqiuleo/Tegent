@@ -3,6 +3,13 @@
 //   - 工具名称运行时才发现，无法提前写入静态规则表；
 //   - 用户对某个 MCP 工具选择“以后不再询问”的决定，会按工具名持久化
 //     到 ~/.tegent/mcp-permissions.json，与 Shell 前缀规则分开保存。
+// {
+//   "alwaysAllow": [
+//     "fs__read_file",
+//     "github__create_issue"
+//   ]
+// }
+
 //
 // 默认策略是：每个 MCP 工具初始都必须询问，直到用户选择“始终允许”。
 // 不根据名称猜测风险，因为 `list_`、`read_`、`search_` 等命名习惯并
@@ -77,6 +84,7 @@ export class McpPermissionStore {
     }
   }
 
+  /** 读取 mcp-permissions.json 文件到内存。 */
   private async ensurePersistedLoaded(): Promise<void> {
     if (this.persisted !== null) return
     this.persisted = await readPersisted()
@@ -95,6 +103,7 @@ export class McpPermissionStore {
   }
 }
 
+/** 如果文件存在且格式正确，则读取持久化权限；否则返回空集合 */
 async function readPersisted(): Promise<Set<string>> {
   try {
     const raw = await fs.readFile(permissionsFile(), 'utf-8')

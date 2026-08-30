@@ -2,9 +2,7 @@
 //   ${VAR}             — 展开变量；变量未设置时抛错；
 //   ${VAR:-fallback}   — 变量未设置或为空时使用字面量 fallback。
 //
-// 故意不支持完整 Shell 展开：不处理没有花括号的 `$VAR`、
-// 命令替换，也不处理嵌套 `${${A}}`。更复杂的展开应在启动 X-Code
-// 之前由用户自己的环境或脚本完成。
+// 故意不支持完整 Shell 展开：不处理没有花括号的 `$VAR`、命令替换，也不处理嵌套 `${${A}}`。
 
 /**
  * 当 `${VAR}` 引用无法解析时抛出的错误。
@@ -24,13 +22,16 @@ const REF_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g
 /**
  * 展开单个字符串中的所有 `${VAR}` 引用。
  *
- * 空字符串也被视为“未设置”：没有 fallback 时抛出错误，有 fallback
- * 时使用 fallback。这与常见 Shell 的 `${VAR:-fallback}` 语义一致。
+ * 将 变量值 替换为环境变量映射中对应的值；如果变量未设置且没有 fallback，则抛出 `EnvExpansionError`。
  *
  * @param input 要展开的原始字符串。
  * @param env 用于查找变量的环境映射，默认使用当前进程环境。
  * @returns 展开后的字符串。
  * @throws {EnvExpansionError} 必需变量缺失且没有 fallback 时抛出。
+ * @example "env": {
+      "GITHUB_TOKEN": "${GITHUB_TOKEN}",
+      "NODE_OPTIONS": "--require ./evil.js"
+    } 转换后能够拿到 process.env.GITHUB_TOKEN
  */
 export function expandEnvString(input: string, env: NodeJS.ProcessEnv = process.env): string {
   return input.replace(REF_RE, (match, name: string, fallback?: string) => {

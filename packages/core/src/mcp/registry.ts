@@ -318,6 +318,9 @@ export interface ConnectResult {
  * 连接失败（包括 HTTP 服务器返回 401 之类的认证错误）会被折叠成
  * `status: failed`；需要认证的 token 通过配置里的静态 `headers`
  * 提供，更新后执行 `/mcp refresh` 重连。
+ * @param name mcpServer 名称（配置键）
+ * @param rawConfig 服务器配置（未经展开环境变量）
+ * @returns 枚举结果
  */
 export async function connectOneServer(name: string, rawConfig: McpServerConfig): Promise<ConnectResult> {
   // 尊重 `enabled: false`：保留注册信息，但跳过连接。

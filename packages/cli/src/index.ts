@@ -162,7 +162,7 @@ async function main() {
 
   // 解析命令行参数（yargs）。CLI 没有配置类 flag，这里只为处理
   // --version / --help；多余的位置参数会被忽略。
-  await parseCliArgs()
+  // await parseCliArgs()
 
   //  获取当前配置了 API Key 的所有模型供应商列表
   //  检测当前环境变量里哪些模型供应商已经可用。

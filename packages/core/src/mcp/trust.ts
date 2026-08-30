@@ -14,6 +14,10 @@ import path from 'node:path'
 
 import { userTeCodeDir } from '../utils.js'
 
+/**
+ * 
+ * @returns `~/.tegent/trusted-projects.json`
+ */
 function trustedFile(): string {
   return path.join(userTeCodeDir(), 'trusted-projects.json')
 }
@@ -41,6 +45,10 @@ function normalize(p: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 
+/**
+ * 
+ * @returns TrustedEntry[] 返回 TrustedEntry 的数组（项目绝对路径的数组），如果文件不存在或格式不正确，则返回空数组。
+ */
 async function readStore(): Promise<TrustedStore> {
   try {
     const raw = await fs.readFile(trustedFile(), 'utf-8')
@@ -99,7 +107,7 @@ export type TrustChoice = 'trust' | 'skip' | 'exit'
  * 的交互样式。提示中展示实际命令，用户可以审查即将执行的内容。
  *
  * @param projectPath 当前项目路径。
- * @param serverSummaries 要展示给用户的服务器名称和命令摘要。
+ * @param serverSummaries 要展示给用户的 mcp server 名称和命令摘要。
  * @param askUser 用于渲染选择对话框的回调。
  * @returns `trust` 表示同意，`skip` 表示本次跳过，`exit` 表示退出 CLI。
  */

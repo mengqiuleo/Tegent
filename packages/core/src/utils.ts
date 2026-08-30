@@ -11,7 +11,9 @@ export const TEGENT_DIR = '.tegent'
 /** 用户级配置目录（默认 `~/.tegent`） */
 export const USER_TEGENT_DIR = path.join(os.homedir(), '.tegent')
 
-
+/**
+ * @returns 用户级配置目录（默认 `~/.tegent`）的绝对路径
+ */
 export function userTeCodeDir(): string {
   return USER_TEGENT_DIR
 }
