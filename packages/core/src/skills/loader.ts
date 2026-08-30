@@ -49,12 +49,19 @@ const frontmatterSchema = z.object({
 })
 
 /**
- * 遍历单个技能目录，并返回该技能自带资源文件的相对路径列表。
+ * 遍历单个 skill 目录，并返回该 skill 自带资源文件的相对路径列表。
  *
- * 只返回非隐藏文件，并排除 SKILL.md 本身。加载阶段提前计算这份列表，是为了让
- * SkillRegistry 拿到一个可以直接注入模型的资源清单。Opencode 和 Gemini CLI
- * 通常在技能激活时做类似扫描；tegent 的注册表在会话内会被冻结，所以这里把文件
- * 列表缓存进 SkillDefinition，后续通过 `/skill refresh` 重建即可。
+ * 得到的结果是当前 skill 其他文件，目的：让模型知道这个 skill 自带了哪些 references、scripts、assets 可以引用.
+ * 最后会在 registry.ts 的 formatSkillActivationBody 中调用
+  <activated_skill>
+    ...SKILL.md 正文...
+    Base directory for this skill: /path/to/skill
+    Relative paths in this skill ... are resolved against the base directory above.
+    
+    Files in this skill directory:
+      - references/api.md
+      - scripts/deploy.sh
+  </activated_skill>
  *
  * @param skillDir 技能目录的绝对路径。
  * @returns 按字母序排序后的技能资源相对路径列表，路径分隔符统一为 `/`。
