@@ -1,13 +1,6 @@
-// Extracted from App.tsx as a single factory that closes over the deps the
-// plugin subcommands need: the four sub-registries (plugin / skill / sub-
-// agent / command), the MCP registry (for restart-in-same-pass refresh),
-// the hook bus, the prompt-cache invalidator, and the skill-registry
-// version bumper (so /help and tab completion recompute).
-//
-// Subcommands: list / info / install / uninstall / enable / disable /
-// search / update / refresh / doctor / marketplace (with its own
-// add / remove / list / refresh / info sub-tree). Unknown sub prints
-// the usage hint.
+// 子命令：list / info / install / uninstall / enable / disable /
+// search / update / refresh / doctor / marketplace（后者自带
+// add / remove / list / refresh / info 子命令树）。未知子命令会 打印用法提示。
 import {
   addKnownMarketplace,
   clearPluginEntry,
@@ -25,18 +18,35 @@ import {
 } from '@tegent/core'
 import type { AgentOptions, PluginScope, PluginSource } from '@tegent/core'
 
+/**
+ * `/plugin` 命令处理器的依赖集合（由 App 层注入，见 createPluginCommandHandler）。
+ */
 export interface PluginCommandDeps {
+  /** Agent 运行时选项，携带各注册表：plugin / skill / subAgent / command / mcp / hookBus */
   options: AgentOptions
+  /** 把命令结果渲染到聊天界面：text 为用户原始输入，content 为 markdown 内容 */
   addCommandMessage: (text: string, content: string) => void
+  /** 向用户弹出选项式询问（`/plugin refresh` 的信任确认流程会用到） */
   askQuestion: (
     question: string,
     options: { label: string; description: string }[],
     opts?: { noOther?: boolean },
   ) => Promise<string>
+  /** 使系统提示缓存失效（插件集合变更后，下一条消息需重建提示词） */
   invalidateSystemPromptCache: () => void
+  /** 递增技能注册表版本号（让 /help 与 Tab 补全重新计算） */
   bumpSkillRegistryVersion: () => void
 }
 
+/**
+ * 三种来源的渲染形式：
+ * - local  → `local: <路径>`
+ * - git    → `git: <url>`（带 ref 时追加 `#<ref>`）
+ * - github → `github:<owner>/<repo>`（带 ref 时追加 `#<ref>`）
+ *
+ * @param s 插件来源对象；为 undefined 时返回 `(unknown)`
+ * @returns 可直接展示的来源描述字符串
+ */
 function formatPluginSource(s: PluginSource | undefined): string {
   if (!s) return '(unknown)'
   if (s.kind === 'local') return `local: ${s.path}`
@@ -44,10 +54,14 @@ function formatPluginSource(s: PluginSource | undefined): string {
   return `github:${s.owner}/${s.repo}${s.ref ? `#${s.ref}` : ''}`
 }
 
-/** Parse a `/plugin enable|disable` argument string, recognizing the
- *  shared `--scope=user|project` / `-s=user|project` flag (same parser
- *  shape as parseSkillScopeFlag). Default scope = 'user' so terse
- *  invocations stay terse. */
+/**
+ * 解析 `/plugin enable|disable` 的参数字符串，识别通用的
+ * `--scope=user|project` / `-s=user|project` 标志（解析逻辑与
+ * parseSkillScopeFlag 相同）。默认 scope = 'user'，让简短调用保持简短。
+ *
+ * @param arg 原始参数串，例如 `"my-plugin --scope=project"`
+ * @returns `{ id, scope }`：去掉标志后剩下的插件 id，以及解析出的作用域
+ */
 function parsePluginScopeFlag(arg: string): { id: string; scope: PluginScope } {
   const tokens = arg.split(/\s+/).filter(Boolean)
   let scope: PluginScope = 'user'
@@ -64,20 +78,36 @@ function parsePluginScopeFlag(arg: string): { id: string; scope: PluginScope } {
   return { id: remaining.join(' '), scope }
 }
 
+/**
+ * `/plugin` 命令处理器工厂：把所有子命令需要的依赖一次性闭包进来，
+ * 返回主分发函数 handlePlugin（它再按第一个词路由到各子命令处理函数）。
+ *
+ * @param deps 依赖集合，见 {@link PluginCommandDeps}
+ * @returns `{ handlePlugin }` — `/plugin` 命令的总入口
+ */
 export function createPluginCommandHandler(deps: PluginCommandDeps) {
   const { options, addCommandMessage, askQuestion, invalidateSystemPromptCache, bumpSkillRegistryVersion } = deps
 
+  /**
+   * `/plugin list`：列出已安装的插件。
+   *
+   * 输出为对齐的列表：开关徽标 `[on]/[off]` + 插件 id + 版本 + 来源市场；
+   * 注册表中若有加载错误，末尾追加提示（引导去 `/plugin doctor`）。
+   *
+   * @param text 用户原始输入（用于消息展示）
+   * @param raw 子命令之后的参数串，可能混有 'list' 本身与过滤标志
+   */
   function pluginList(text: string, raw: string): void {
     const reg = options.pluginRegistry
     if (!reg) {
-      addCommandMessage(text, 'Plugin system is disabled for this session (`--no-plugins`).')
+      addCommandMessage(text, 'Plugin system is disabled for this session.')
       return
     }
-    // Optional filters: --enabled (only on), --disabled (only off), no flag = all.
+    // 可选过滤：--enabled（只看已启用）、--disabled（只看已禁用）、不带标志 = 全部。
     const tokens = raw.trim().split(/\s+/).filter(Boolean)
     let filter: 'all' | 'enabled' | 'disabled' = 'all'
     for (const t of tokens) {
-      // Skip the subcommand word itself ('list') if present
+      // 跳过子命令词本身（'list'），如果存在的话
       if (t === 'list') continue
       if (t === '--enabled') filter = 'enabled'
       else if (t === '--disabled') filter = 'disabled'
@@ -111,6 +141,16 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, lines.join('\n'))
   }
 
+  /**
+   * `/plugin info <id>`：显示单个插件的详情。
+   *
+   * 输出分两段：manifest 元数据（版本 / 描述 / 来源 / 目录 / 作者等），
+   * 以及插件的"贡献物"（它向宿主注入的 skills / agents / commands /
+   * mcpServers / hooks —— 可能是目录路径，也可能是内联配置）。
+   *
+   * @param text 用户原始输入
+   * @param raw 插件 id，格式 `name@marketplace`
+   */
   async function pluginInfo(text: string, raw: string): Promise<void> {
     const id = raw.trim()
     if (!id) {
@@ -122,6 +162,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       addCommandMessage(text, `No plugin \`${id}\` loaded. Check \`/plugin list\`.`)
       return
     }
+    // 解析插件声明了哪些贡献物（各目录 / 内联的 MCP 与 hooks 配置）
     const c = await resolveContributions(plugin)
     const lines: string[] = [
       `**${plugin.id}** v${plugin.manifest.version}`,
@@ -164,6 +205,22 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, lines.join('\n'))
   }
 
+  /**
+   * `/plugin install <source>`：安装插件。
+   *
+   * 只接受一个来源参数（`--yes` / `-y` 会被接受但忽略），识别来源类型后
+   * 下载 / 拷贝到缓存目录并读取 manifest。四种来源：
+   * 1. `name@marketplace` — 先到已订阅市场的缓存索引里查真实来源
+   * 2. `github:owner/repo[#ref]` — GitHub 仓库简写
+   * 3. `https://…` / `git@…` — 任意 git URL
+   * 4. `./path`、`/abs/path`、`C:\path` — 本地目录
+   *
+   * 注意：安装只落盘，插件的贡献物（技能 / 子代理 / 命令 / hooks）不会
+   * 立即生效，需再执行 `/plugin refresh`；MCP 服务器则要单独 `/mcp refresh`。
+   *
+   * @param text 用户原始输入
+   * @param raw 来源字符串
+   */
   async function pluginInstall(text: string, raw: string): Promise<void> {
     if (!raw) {
       addCommandMessage(
@@ -180,6 +237,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
 
     const tokens = raw.trim().split(/\s+/)
     const source_str = tokens[0]!
+    // --yes / -y 被接受但忽略；除此之外的多余参数一律报错
     const extras = tokens.slice(1).filter((t) => t !== '--yes' && t !== '-y')
     if (extras.length > 0) {
       addCommandMessage(
@@ -194,12 +252,15 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     let marketplace: string
     let expectedName: string | undefined
 
+    // 识别来源类型：本地路径 / git URL / github 简写 / 市场引用（name@marketplace）。
+    // 市场引用的判定必须排除前三种，避免把 URL 或路径里的 '@' 误当成市场分隔符。
     const isPath = raw.startsWith('./') || raw.startsWith('../') || raw.startsWith('/') || /^[a-zA-Z]:[/\\]/.test(raw)
     const isGitUrl = /^https?:\/\//i.test(raw) || raw.startsWith('git@')
     const isGhShort = raw.startsWith('github:')
     const atIdx = raw.lastIndexOf('@')
     const isMarketplaceRef = atIdx > 0 && !isPath && !isGitUrl && !isGhShort
 
+    // 市场引用：先在已订阅市场的缓存索引中查该插件，拿到真实安装来源
     if (isMarketplaceRef) {
       const name = raw.slice(0, atIdx)
       const mpName = raw.slice(atIdx + 1)
@@ -252,6 +313,16 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     }
   }
 
+  /**
+   * `/plugin uninstall <id>`：卸载插件。
+   *
+   * 做两件事：删除缓存目录中该插件的所有版本，并清掉 user / project
+   * 两个作用域配置里的启停记录。插件的数据目录（用户状态）会保留，
+   * 重装后可继续使用。活跃注册表里的贡献物要等 `/plugin refresh` 才移除。
+   *
+   * @param text 用户原始输入
+   * @param raw 插件 id，格式 `name@marketplace`
+   */
   async function pluginUninstall(text: string, raw: string): Promise<void> {
     const id = raw.trim()
     if (!id) {
@@ -264,6 +335,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
         addCommandMessage(text, `No plugin \`${id}\` installed.`)
         return
       }
+      // 清掉两个作用域里的启停记录；清理失败不影响卸载结果
       for (const scope of ['user', 'project'] as PluginScope[]) {
         await clearPluginEntry(id, scope).catch(() => undefined)
       }
@@ -279,6 +351,16 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     }
   }
 
+  /**
+   * `/plugin enable|disable <id> [--scope=user|project]`：切换插件启停。
+   *
+   * 只改写指定作用域配置文件里的开关，不动已加载的注册表；
+   * 要让变更立即生效需执行 `/plugin refresh`。
+   *
+   * @param text 用户原始输入
+   * @param raw 参数串（插件 id + 可选 scope 标志），由 parsePluginScopeFlag 解析
+   * @param enable true 对应 enable 子命令，false 对应 disable 子命令
+   */
   async function pluginToggle(text: string, raw: string, enable: boolean): Promise<void> {
     const { id, scope } = parsePluginScopeFlag(raw)
     if (!id) {
@@ -298,6 +380,15 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     }
   }
 
+  /**
+   * `/plugin search <keyword>`：按关键词搜索插件。
+   *
+   * 只查本地缓存的市场索引（不联网）：把每个条目的 名称 + 描述 + keywords
+   * 拼成一句话，做小写子串匹配。缓存为空时引导用户先刷新市场索引。
+   *
+   * @param text 用户原始输入
+   * @param raw 搜索关键词
+   */
   async function pluginSearch(text: string, raw: string): Promise<void> {
     const kw = raw.trim().toLowerCase()
     if (!kw) {
@@ -324,6 +415,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     const matches: Array<{ marketplace: string; name: string; description?: string; verified?: boolean }> = []
     for (const m of marketplaces) {
       for (const entry of m.plugins) {
+        // 把名称 / 描述 / 关键词拼成一个"草垛"（haystack），再做包含匹配
         const hay = [entry.name, entry.description ?? '', ...(entry.keywords ?? [])].join(' ').toLowerCase()
         if (hay.includes(kw)) {
           matches.push({
@@ -353,6 +445,16 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, lines.join('\n'))
   }
 
+  /**
+   * `/plugin update <id>` / `/plugin update --all`：更新插件。
+   *
+   * "更新"即按安装记录里的原始来源重新安装一遍，再比较前后版本号：
+   * 一样 → 原地重装（unchanged），不一样 → 升级（updated）。
+   * `--all` 时串行更新所有已安装插件，单个失败跳过并继续。
+   *
+   * @param text 用户原始输入
+   * @param raw 插件 id，或 `--all` / `-a`
+   */
   async function pluginUpdate(text: string, raw: string): Promise<void> {
     const tokens = raw.trim().split(/\s+/).filter(Boolean)
     const all = tokens.includes('--all') || tokens.includes('-a')
@@ -390,6 +492,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
             marketplace: rec.marketplace,
             expectedName: rec.name,
           })
+          // 版本号没变 → 视为未变更（原地重装）；变了 → 记一次更新
           if (result.manifest.version === rec.version) {
             lines.push(`  ${rec.id}: reinstalled at ${rec.version}`)
             unchanged++
@@ -432,6 +535,17 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     }
   }
 
+  /**
+   * `/plugin refresh`：重新扫描并重载所有插件的贡献物。
+   *
+   * 核心一步是 refreshPluginContributions：把磁盘上的插件集合与各活跃
+   * 注册表做增量同步 —— skills / agents / commands 进对应子注册表，
+   * hooks 挂到 hook 总线，MCP 服务器按需重连（可能触发信任询问）。
+   * 完成后再让系统提示缓存失效、递增技能注册表版本，最后把
+   * 插件 → 子注册表 → MCP 三层变更摘要拼成报告输出。
+   *
+   * @param text 用户原始输入
+   */
   async function pluginRefresh(text: string): Promise<void> {
     if (!options.pluginRegistry) {
       addCommandMessage(text, 'Plugin system is disabled for this session (`--no-plugins`).')
@@ -453,9 +567,11 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       addCommandMessage(text, `Failed to reload plugins: ${err instanceof Error ? err.message : String(err)}`)
       return
     }
+    // 插件集合已变化：让下一条消息重建系统提示，并让 /help、Tab 补全重算
     invalidateSystemPromptCache()
     bumpSkillRegistryVersion()
 
+    // —— 组装报告。第一层：插件本体的增 / 删 / 改 ——
     const parts: string[] = []
     const p = summary.plugins
     if (p.added.length) parts.push(`added: ${p.added.join(', ')}`)
@@ -463,6 +579,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     if (p.changed.length) parts.push(`changed: ${p.changed.join(', ')}`)
     if (parts.length === 0) parts.push(`no plugin changes (${p.unchanged.length} unchanged)`)
     const lines = [`Reloaded plugins — ${parts.join('; ')}.`]
+    // 第二层：下游子注册表（skills / subAgents / commands）的联动变更数
     const subBits: string[] = []
     if (summary.skills && (summary.skills.added.length || summary.skills.removed.length))
       subBits.push(`${summary.skills.added.length + summary.skills.removed.length} skill change(s)`)
@@ -471,6 +588,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     if (summary.commands && (summary.commands.added.length || summary.commands.removed.length))
       subBits.push(`${summary.commands.added.length + summary.commands.removed.length} command change(s)`)
     if (subBits.length) lines.push(`Downstream: ${subBits.join(', ')}.`)
+    // 第三层：MCP 服务器的增 / 删 / 改；无变化但有存量时显示"已重连"
     if (summary.mcp) {
       const m = summary.mcp
       const mcpBits: string[] = []
@@ -490,6 +608,15 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, lines.join('\n'))
   }
 
+  /**
+   * `/plugin doctor`：插件系统健康检查。
+   *
+   * 汇总已加载 / 启用 / 禁用的插件数量与加载错误数，逐条列出错误
+   * （插件 id + manifest 路径 + 错误信息），并提示更深的诊断要去
+   * debug 日志看（MCP 冲突、hook 报错、不支持的 commands 贡献等）。
+   *
+   * @param text 用户原始输入
+   */
   function pluginDoctor(text: string): void {
     const reg = options.pluginRegistry
     if (!reg) {
@@ -517,11 +644,25 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, lines.join('\n'))
   }
 
+  /**
+   * `/plugin marketplace ...`：市场（插件索引源）管理子命令树。
+   *
+   * "市场"是一个可订阅的插件索引（marketplace.json），本命令树负责：
+   * - `list`（缺省）：列出已订阅的市场
+   * - `add <name> <source>`：订阅新市场（只登记，索引需 refresh 拉取）
+   * - `remove <name>`：退订
+   * - `refresh [name]`：拉取全部 / 指定市场的索引到本地缓存
+   * - `info <name>`：展示某市场的元数据与插件列表（读缓存）
+   *
+   * @param text 用户原始输入
+   * @param arg `marketplace` 之后的参数串
+   */
   async function handlePluginMarketplace(text: string, arg: string): Promise<void> {
     const parts = arg.trim().split(/\s+/)
     const sub = (parts[0] ?? '').toLowerCase()
     const rest = parts.slice(1).join(' ').trim()
 
+    // list（缺省）：列出已订阅的市场
     if (sub === '' || sub === 'list') {
       const km = await readKnownMarketplaces()
       if (km.marketplaces.length === 0) {
@@ -538,6 +679,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       return
     }
 
+    // add <name> <source>：登记订阅；索引要再执行 refresh 才会拉取
     if (sub === 'add') {
       const argParts = rest.split(/\s+/)
       if (argParts.length < 2 || !argParts[0] || !argParts[1]) {
@@ -547,6 +689,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
         )
         return
       }
+      // 第一个词作为市场名，其余词重新拼接为来源字符串
       const [name, ...sourceParts] = argParts
       const source = sourceParts.join(' ')
       try {
@@ -561,6 +704,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       return
     }
 
+    // remove <name>：退订市场
     if (sub === 'remove') {
       if (!rest) {
         addCommandMessage(text, 'Usage: `/plugin marketplace remove <name>`')
@@ -572,6 +716,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       return
     }
 
+    // refresh [name]：不带名字则刷新全部已订阅市场，逐个拉取索引并汇报
     if (sub === 'refresh') {
       const km = await readKnownMarketplaces()
       const targets = rest ? km.marketplaces.filter((m) => m.name === rest) : km.marketplaces
@@ -592,6 +737,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
       return
     }
 
+    // info <name>：展示缓存的索引详情（含插件列表）；无缓存则提示先 refresh
     if (sub === 'info') {
       if (!rest) {
         addCommandMessage(text, 'Usage: `/plugin marketplace info <name>`')
@@ -624,6 +770,13 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
     addCommandMessage(text, 'Usage: `/plugin marketplace <list|add|remove|refresh|info>`')
   }
 
+  /**
+   * `/plugin` 总入口：取第一个词作为子命令，路由到对应的处理函数，
+   * 剩余部分作为 rest 传下去。空参视同 `list`，未知子命令打印用法。
+   *
+   * @param text 用户原始输入
+   * @param arg `/plugin` 之后的完整参数串
+   */
   async function handlePlugin(text: string, arg: string): Promise<void> {
     const trimmed = arg.trim()
     const parts = trimmed.split(/\s+/)
