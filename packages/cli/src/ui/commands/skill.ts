@@ -1,10 +1,5 @@
-// Extracted from App.tsx via a factory that closes over the deps each
-// subcommand needs: registry access (read + reload), settings writers,
-// prompt-cache invalidation, and the pending-skill ref. Returns the
-// handler function the dispatcher in App.tsx calls.
-//
-// Subcommands: install / list / refresh / disable / enable / uninstall.
-// Unknown subs print the usage hint.
+// 子命令：install / list / refresh / disable / enable / uninstall。
+// 未知子命令打印用法提示。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -25,18 +20,18 @@ export interface SkillCommandDeps {
   bumpSkillRegistryVersion: () => void
 }
 
-/** Minimal YAML name extractor for SKILL.md frontmatter.
- *  Only needs to find `name: <value>` — full parse happens in the loader. */
+/** SKILL.md frontmatter 的极简 YAML name 提取器。
+ *  只需找到 `name: <value>` —— 完整解析在 loader 中进行。 */
 function extractSkillName(content: string): string | null {
   const match = content.match(/^---\r?\n[\s\S]*?^name:\s*["']?([^"'\r\n]+)["']?\s*$/m)
   return match ? match[1].trim() : null
 }
 
-/** Split a skill argument into `(name, scope)`, recognizing
- *  `--scope=user` / `--scope=project` / `-s=user` etc. Bare arg with
- *  no flag returns `scope: undefined` so the caller can default off the
- *  skill's source. Unknown scope strings are ignored (scope stays
- *  undefined) — keeps the parser permissive. */
+/** 将 skill 参数拆分为 `(name, scope)`，识别
+ *  `--scope=user` / `--scope=project` / `-s=user` 等。不带 flag 的
+ *  裸参数返回 `scope: undefined`，让调用方可以按 skill 的
+ *  source 取默认值。未知的 scope 字符串会被忽略（scope 保持
+ *  undefined）—— 保持解析器的宽容性。 */
 function parseSkillScopeFlag(arg: string): { name: string; scope?: SkillSettingsScope } {
   const tokens = arg.split(/\s+/).filter(Boolean)
   let scope: SkillSettingsScope | undefined
@@ -76,7 +71,7 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         return
       }
 
-      const name = extractSkillName(content)
+      const name = extractSkillName(content) // skill 取名
       if (!name) {
         addCommandMessage(text, 'Invalid SKILL.md: missing `name` in frontmatter.')
         return
@@ -86,7 +81,7 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
       const skillFile = path.join(skillDir, 'SKILL.md')
       try {
         await fs.mkdir(skillDir, { recursive: true })
-        await fs.writeFile(skillFile, content, 'utf-8')
+        await fs.writeFile(skillFile, content, 'utf-8') // fetch 的 content 写入文件
       } catch (err) {
         addCommandMessage(text, `Failed to save skill: ${err instanceof Error ? err.message : String(err)}`)
         return
@@ -129,22 +124,22 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         addCommandMessage(text, `Failed to reload skills: ${err instanceof Error ? err.message : String(err)}`)
         return
       }
-      // Invalidate prompt cache: both the system prompt's `## Available
-      // Skills` block and the activateSkill tool description embed the
-      // skill list. Better to take one cache miss than to send a stale
-      // skill surface to the model. Same trade /mcp refresh makes.
+      // 使 prompt 缓存失效：系统提示词的 `## Available
+      // Skills` 块和 activateSkill 工具描述都内嵌了
+      // skill 列表。宁可承受一次缓存未命中，也不要把过期的
+      // skill 信息发给模型。与 /mcp refresh 的取舍相同。
       invalidateSystemPromptCache()
-      // Drop a pending skill if the user `/<skillname>` for a skill that
-      // was just removed or disabled — otherwise the next plain user
-      // message would inject orphaned skill content.
+      // 若用户曾对刚被移除或禁用的 skill 执行 `/<skillname>`，
+      // 丢弃该 pending skill —— 否则下一条普通用户消息
+      // 会注入已失效的 skill 内容。
       const pending = pendingSkillRef.current
       if (pending && !options.skillRegistry.get(pending.name)) {
         pendingSkillRef.current = null
       }
-      // Force the slash-command tab completion + /help list to re-memo
-      // off the new skill set. The registry object identity is stable
-      // (reload() mutates in place), so the version counter is the
-      // signal React needs to recompute the memoized list.
+      // 强制 slash 命令的 Tab 补全 + /help 列表基于
+      // 新的 skill 集合重新 memo。注册表对象身份不变
+      // （reload() 原地修改），因此版本计数器是 React
+      // 重新计算 memoized 列表所需的信号。
       bumpSkillRegistryVersion()
 
       const summaryParts: string[] = []
@@ -154,9 +149,10 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
       if (summary.unchanged.length) summaryParts.push(`unchanged: ${summary.unchanged.join(', ')}`)
       if (summaryParts.length === 0) summaryParts.push('no skills found')
       const lines = [`Reloaded skills — ${summaryParts.join('; ')}.`]
-      // Tight `\n` between primary result and the advisory note — matches the
-      // pattern used by /mcp refresh and the rest of /skill install / disable /
-      // enable / remove. No blank line within a single command's result block.
+      // 主结果与提示说明之间用紧凑的 `\n` —— 与
+      // /mcp refresh 及 /skill 的 install / disable /
+      // enable / remove 所用模式保持一致。单个命令的结果块内
+      // 不留空行。
       lines.push('Note: next message rebuilds the system prompt, so prompt-cache will miss once.')
       addCommandMessage(text, lines.join('\n'))
       return
@@ -177,11 +173,11 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         )
         return
       }
-      // Default the disable scope to the skill's own source so users get the
-      // expected "disable the project skill yansu" without typing --scope.
-      // Re-enable is symmetric: clear from the source scope first; if the
-      // skill is still effectively disabled it's because the OTHER scope
-      // also lists it, and we'll surface that.
+      // 将 disable 的 scope 默认取 skill 自身的 source，用户无需
+      // 输入 --scope 就能得到预期的“禁用项目 skill yansu”效果。
+      // 重新启用是对称的：先从 source scope 清除；如果 skill
+      // 实际上仍处于禁用状态，那是因为另一个 scope
+      // 也列出了它，届时我们会提示出来。
       const effectiveScope: SkillSettingsScope = scope ?? entry.source
       const disable = sub === 'disable'
       let result: 'changed' | 'noop'
@@ -201,9 +197,9 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         )
         return
       }
-      // After re-enable, check whether the other scope is still hiding it
-      // — common pitfall when the user disables at user scope and then expects
-      // a project-level enable to revive it.
+      // 重新启用后，检查另一个 scope 是否仍将其隐藏
+      // —— 常见误区：用户在 user scope 禁用后，
+      // 期望 project 级别的 enable 能将其恢复。
       let otherScopeNote = ''
       if (!disable) {
         const other: SkillSettingsScope = effectiveScope === 'user' ? 'project' : 'user'
@@ -213,7 +209,7 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
             otherScopeNote = `\n_Note: \`${bareName}\` is also listed in ${other} settings (\`${skillSettingsPath(other)}\`). Run \`/skill enable ${bareName} --scope=${other}\` to fully re-enable._`
           }
         } catch {
-          // best-effort hint — silent failure is fine
+          // 尽力而为的提示 —— 静默失败即可
         }
       }
       const verb = disable ? 'Disabled' : 'Enabled'
@@ -235,10 +231,10 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         addCommandMessage(text, `No skill named \`${name}\` is loaded. Run \`/skill list\` to see available skills.`)
         return
       }
-      // Plugin-contributed skills live under the plugin's cache dir, not
-      // under <baseDir>/skills/. `/skill uninstall` here would compute the
-      // wrong path and either no-op silently or remove an unrelated dir
-      // — redirect the user to `/plugin uninstall` instead.
+      // 插件提供的 skill 位于插件的缓存目录下，而非
+      // <baseDir>/skills/ 下。这里的 `/skill uninstall` 会算出
+      // 错误的路径，要么静默无操作，要么删掉无关的目录
+      // —— 改为引导用户使用 `/plugin uninstall`。
       if (entry.pluginId) {
         addCommandMessage(
           text,
@@ -254,14 +250,14 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         addCommandMessage(text, `Failed to remove \`${skillDir}\`: ${err instanceof Error ? err.message : String(err)}`)
         return
       }
-      // Also clear any disable entries — leaving stale entries pointing
-      // at an uninstalled skill would silently swallow a future re-install
-      // with the same name (it'd come back disabled).
+      // 同时清除所有 disable 条目 —— 留下指向已卸载 skill 的
+      // 过期条目，会静默吞掉将来同名的重新安装
+      // （它会以禁用状态回归）。
       try {
         await setSkillDisabled(name, 'user', false)
         await setSkillDisabled(name, 'project', false)
       } catch {
-        // best-effort — main rm already succeeded
+        // 尽力而为 —— 主删除操作已成功
       }
       addCommandMessage(
         text,

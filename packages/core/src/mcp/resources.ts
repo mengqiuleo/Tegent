@@ -1,14 +1,24 @@
-// MCP resource 是服务器提供、模型可以按需读取的数据，例如文件系统
-// 服务器暴露的文件、日志条目或数据库行。这里不把所有资源自动注入
-// 对话（这样消耗 token，且大多数资源与当前任务无关），而是提供两个工具：
+// MCP 服务器除了提供可调用的"工具"（tool），还可以提供"资源"（resource）：
+// 一批用 URI 标识、模型可以按需读取的数据，例如服务器暴露的文件内容、
+// 日志条目、数据库的若干行。
 //
-//   - listMcpResources({ server? }) — 枚举模型可以读取的 URI；
-//   - readMcpResource({ uri }) — 按 URI 读取一个资源。
+// 本文件为资源声明两个内建工具，让模型按需"拉取"，而不是把资源全量注入
+// 对话（资源可能又多又大，且大多数与当前任务无关，全量注入纯属浪费 token）：
 //
-// 两个工具都不定义 `execute`，由 agent loop 的 processToolCalls
-// 统一分发；具体见 tool-execution.ts 中的
-// BYPASS_LOOP_GUARD_HANDLERS。只有存在 MCP registry 时，
-// buildTools 才会把它们加入系统提示词。
+//   - listMcpResources({ server? }) — 列出可读的资源及其 URI，可按服务器过滤；
+//   - readMcpResource({ uri }) — 用 list 得到的 URI 读取一个资源的内容。
+//
+// 这两个工具只有"声明"（名字 + 参数 schema + 给模型看的 description），
+// 没有 execute。没有 execute 的工具 AI SDK 不会在本地执行，模型的调用请求
+// 会被留在 result.toolCalls 里，交给 agent loop 的 processToolCalls 统一分发，
+// 落到 tool-execution.ts 里的真正实现 handleListMcpResources /
+// handleReadMcpResource（登记在 BYPASS_LOOP_GUARD_HANDLERS 中：列资源只读
+// 本地 registry 缓存、读资源没有本地副作用，所以允许它们跳过针对
+// writeFile/edit/shell 的 loop guard 和权限流水线）。
+//
+// 注册时机见 loop.ts：只有配置了 MCP registry 时才会把这两个工具加入
+// 工具列表——一个 MCP 服务器都没有时，模型无从列举资源，注册了也没意义。
+// 执行工具：handleListMcpResources，handleReadMcpResource
 import { tool } from 'ai'
 
 import { z } from 'zod'
@@ -25,7 +35,6 @@ Use this BEFORE readMcpResource so you have a URI to read. If the model already 
       .optional()
       .describe('Optional server name to filter by. Omit to list resources from all servers.'),
   }),
-
 })
 
 export const readMcpResource = tool({
