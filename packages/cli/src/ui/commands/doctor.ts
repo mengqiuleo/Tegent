@@ -1,7 +1,3 @@
-// One-shot environment diagnostic: checks API keys, Node version, shell
-// availability, MCP server health, plugin load errors, custom agent parse
-// state, and knowledge file sizes. Modelled after Claude Code's /doctor
-// but scoped to what TEGENT actually needs.
 import { getAvailableProviders, getEnvVarName } from '@tegent/core'
 import type { AgentOptions } from '@tegent/core'
 
@@ -14,7 +10,7 @@ export interface DoctorCommandDeps {
   echoCommand: (text: string) => void
 }
 
-/** All known provider keys — order matches PROVIDER_DETECTION_ORDER. */
+
 const ALL_PROVIDERS = ['anthropic', 'openai', 'deepseek', 'google', 'alibaba', 'xai', 'zhipu', 'moonshotai'] as const
 
 export function createDoctorCommandHandler(deps: DoctorCommandDeps) {
