@@ -202,7 +202,7 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
     // 只有 manifest 声明 userConfig 字段且调用方传入 prompt callback 时才触发。
     // 插件在 hook / mcp 启动时会看到空 env，和引入该功能前的行为一致。
     // prompt 返回 null 会中止安装，按拒绝授权处理；非 null 对象会通过 setPluginUserConfig 持久化。
-    if (manifest.userConfig && manifest.userConfig.length > 0 && req.userConfigPrompt) {
+    if (manifest.userConfig && manifest.userConfig.length > 0 && req.userConfigPrompt) { // 目前 cli 中均未传值，即都不需要提示
       const collected = await req.userConfigPrompt(manifest.userConfig)
       if (collected === null) {
         throw new InstallError('install cancelled by user (userConfig prompt aborted)')

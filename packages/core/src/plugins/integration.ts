@@ -319,8 +319,8 @@ async function resolvePluginMcpServers(
 
   // 把所属插件的 userConfig 值合并进每个 server 的 env token。
   try {
-    const pluginEnv = await getPluginUserConfigEnv(plugin.id)
-    if (Object.keys(pluginEnv).length > 0) {
+    const pluginEnv = await getPluginUserConfigEnv(plugin.id) // todo： `plugins/user-config.json` 文件只会在 install plugin 时写入，但是目前插件安装时均并未触发，即目前均没有这个文件，是个{}
+    if (Object.keys(pluginEnv).length > 0) { // 均不会执行
       for (const name of Object.keys(expanded)) {
         const cfg = expanded[name]!
         // 只有 stdio server 会启动子进程并接收 env；HTTP server 是远端端点，
