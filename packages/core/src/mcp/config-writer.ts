@@ -1,13 +1,10 @@
 // 本文件为 `/mcp add` 和 `/mcp remove` 提供配置读写能力。
 // 看起来只是读改写 JSON，但必须同时满足以下约束：
-//   - 保留 theme、model、thinking 等无关的顶层字段；
-//   - 添加或删除一个服务器时保留其他 `mcpServers` 条目；
+//   - 保留 model、thinking 等无关的顶层字段；
+//   - 添加或删除一个 mcpServer 时保留其他 `mcpServers` 条目；
 //   - 通过临时文件加重命名实现原子写入，避免 Ctrl-C 留下半个 JSON；
 //   - 写入前重新读取文件，尽量避免覆盖其他进程刚刚做出的修改。
-//
-// 写入前复用 loader 使用的同一套 Zod 模式校验配置。
-// 因此 `/mcp add-json` 中本来会在下次启动时报错的内容，
-// 会在入口处立即被拒绝。
+
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -21,12 +18,9 @@ export type ConfigScope = 'user' | 'project'
 /**
  * 返回指定作用域的 config.json 路径。
  *
- * 这里与 loader 的读取路径保持一致，确保本函数写入的内容会在下次
- * 启动或执行 `/mcp refresh` 时被重新加载。
- *
  * @param scope 配置作用域：用户级或当前项目级。
  * @param cwd 当前项目的绝对路径。
- * @returns 对应作用域的配置文件路径。
+ * @returns 对应作用域的配置文件路径 `~/.tegent/config.json` 或者 `.tegent/config.json`。
  */
 export function getConfigPath(scope: ConfigScope, cwd: string): string {
   if (scope === 'user') return getUserConfigPath()
@@ -84,17 +78,17 @@ async function writeConfigObject(scope: ConfigScope, cwd: string, obj: Record<st
 }
 
 /**
- * 描述一个服务器名称当前存在于哪些配置作用域。
+ * 描述一个 mcpServer 名称当前存在于哪些配置作用域。
  *
  * `/mcp remove` 可以据此自动选择作用域；如果用户级和项目级同时存在
- * 同名服务器，则返回 `both`，要求调用方显式指定 `--scope`。
+ * 同名 mcpServer ，则返回 `both`，要求调用方显式指定 `--scope`。
  */
 export type DetectScopeResult = { kind: 'not-found' } | { kind: 'user' } | { kind: 'project' } | { kind: 'both' }
 
 /**
- * 检查服务器名称是否存在于指定作用域的配置中。
+ * 检查 mcpServer 名称是否存在于指定作用域的配置中。
  *
- * @param name 要查找的服务器名称。
+ * @param name 要查找的 mcpServer 名称。
  * @param scope 要检查的配置作用域。
  * @param cwd 当前项目路径。
  * @returns 找到同名条目时返回 `true`，否则返回 `false`。
@@ -108,9 +102,9 @@ export async function detectScope(name: string, cwd: string): Promise<DetectScop
 }
 
 /**
- * 检查指定作用域的 `mcpServers` 是否包含服务器名称。
+ * 检查指定作用域的 `mcpServers` 是否包含 mcpServer 名称。
  *
- * @param name 要查找的服务器名称。
+ * @param name 要查找的 mcpServer 名称。
  * @param scope 要检查的配置作用域。
  * @param cwd 当前项目路径。
  * @returns 条目存在时返回 `true`。
@@ -123,13 +117,13 @@ export async function serverExists(name: string, scope: ConfigScope, cwd: string
 }
 
 /**
- * 将一个服务器配置写入指定作用域。
+ * 将一个 mcpServer 配置写入指定作用域。
  *
  * 函数会先用统一 schema 校验配置，再读取最新文件内容并只替换目标
  * 条目。它本身不负责判断重复名称，调用方应先用 `serverExists` 检查，
  * 并向用户展示更友好的“已存在”提示。
  *
- * @param name 要写入的服务器名称。
+ * @param name 要写入的 mcpServer 名称。
  * @param config 要写入的 MCP 配置。
  * @param scope 目标配置作用域。
  * @param cwd 当前项目路径。
@@ -158,13 +152,13 @@ export async function writeServerToConfig(
 }
 
 /**
- * 从指定作用域删除一个服务器配置。
+ * 从指定作用域删除一个 mcpServer 配置。
  *
- * 该操作是幂等的：服务器不存在或文件不存在时返回 `removed: false`。
- * 删除最后一个服务器后仍保留 `mcpServers: {}`，方便以后继续添加，
+ * 该操作是幂等的： mcpServer 不存在或文件不存在时返回 `removed: false`。
+ * 删除最后一个 mcpServer 后仍保留 `mcpServers: {}`，方便以后继续添加，
  * 也避免用户查看 Git diff 时看到不必要的字段删除和重建。
  *
- * @param name 要删除的服务器名称。
+ * @param name 要删除的 mcpServer 名称。
  * @param scope 要修改的配置作用域。
  * @param cwd 当前项目路径。
  * @returns 配置文件路径，以及本次是否真的删除了条目。
@@ -194,12 +188,12 @@ export async function removeServerFromConfig(
 }
 
 /**
- * 读取指定作用域中某个服务器的原始配置。
+ * 读取指定作用域中某个 mcpServer 的原始配置。
  *
  * 主要用于 `/mcp add` 发现重复名称时展示当前配置。找不到条目时返回
  * `null`；读取或解析失败时也返回 `null`，因为重复检查不应让命令崩溃。
  *
- * @param name 要读取的服务器名称。
+ * @param name 要读取的 mcpServer 名称。
  * @param scope 要读取的配置作用域。
  * @param cwd 当前项目路径。
  * @returns 原始配置对象，找不到或读取失败时返回 `null`。

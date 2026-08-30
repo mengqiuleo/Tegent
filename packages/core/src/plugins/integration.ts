@@ -93,8 +93,9 @@ export interface BuildPluginIntegrationOptions {
 }
 
 /**
- * 根据插件加载结果构建所有下游集成数据。
- *
+ * 构建 plugin 所有的 skill， sub-agent，slash command，MCP server 和 hook 贡献的集成结果，路径均改为绝对路径。
+ * plugin 包括 user 和 project
+ * 
  * 函数只处理已启用插件：目录贡献会整理成 extraDirs，MCP server 会合并去重，
  * hooks 会构建成 HookRegistry 和 HookBus。非致命错误收集在输出对象里。
  *
@@ -154,6 +155,7 @@ export async function buildPluginIntegration(
         mcpOwners.set(name, plugin.id)
       }
     }
+    // out.mcpServers 最后拿到的东西，其实就是 mcp.json 中的东西，并且是变量替换成绝对路径后的
   }
 
   out.hookRegistry = buildHookRegistry(hookInputs)
@@ -183,7 +185,7 @@ async function resolvePluginHooks(
   } else {
     try {
       const text = await fs.readFile(contrib.path, 'utf-8')
-      raw = JSON.parse(text)
+      raw = JSON.parse(text) // 解析出来的是 `<cwd>/.tegent/plugins/<name>/hooks/hooks.json` 或 `~/.tegent/plugins/<name>/hooks/hooks.json` 的内容
     } catch (err) {
       out.hookErrors.push({
         pluginId: plugin.id,
@@ -315,13 +317,10 @@ async function resolvePluginMcpServers(
   const vars = buildVariableContext({ pluginDir: plugin.rootDir, cwd, pluginId: plugin.id })
   const expanded = expandMcpServerVariables(servers, vars)
 
-  // 把所属插件的 userConfig 值合并进每个 server 的 env。
-  // 作者如果希望使用 manifest userConfig 中声明的 API key，只需要在 mcpServers
-  // entry 里把它当普通环境变量引用；也可以不显式引用，依赖子进程继承 env。
-  // 已有 server env 条目优先级更高，这样作者可以按 server 覆盖 userConfig 值。
+  // 把所属插件的 userConfig 值合并进每个 server 的 env token。
   try {
-    const pluginEnv = await getPluginUserConfigEnv(plugin.id)
-    if (Object.keys(pluginEnv).length > 0) {
+    const pluginEnv = await getPluginUserConfigEnv(plugin.id) // todo： `plugins/user-config.json` 文件只会在 install plugin 时写入，但是目前插件安装时均并未触发，即目前均没有这个文件，是个{}
+    if (Object.keys(pluginEnv).length > 0) { // 均不会执行
       for (const name of Object.keys(expanded)) {
         const cfg = expanded[name]!
         // 只有 stdio server 会启动子进程并接收 env；HTTP server 是远端端点，

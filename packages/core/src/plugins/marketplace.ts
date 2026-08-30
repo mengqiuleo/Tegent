@@ -1,7 +1,3 @@
-// marketplace 是一个经过维护者整理的插件目录，它的 `marketplace.json` 是一组
-// `{ name, source, ... }` 条目。CLI 自己不托管 marketplace；为什么采用“订阅他人
-// marketplace”的模式，见 [[plugin-marketplace-design]] §7.1。本模块负责：
-//
 //   1. 读取和写入 `known_marketplaces.json`，也就是用户的订阅列表，同时保护
 //      保留名称不被冒用。
 //   2. 从直接指向 marketplace.json 的 HTTPS URL，或从 git URL 获取并缓存
@@ -399,7 +395,7 @@ export async function ensureDefaultMarketplaces(): Promise<void> {
  *
  * 如果名称是保留名称，但 source 不匹配规范上游，则拒绝注册；规则见
  * RESERVED_MARKETPLACE_NAMES。函数是幂等的：重复添加同名订阅会更新 source。
- *
+ * 增加或移除订阅，是将原文件中的内容读取出来，修改后再写回
  * @param entry 要注册或更新的 marketplace 订阅条目。
  * @throws 当保留名称指向非规范来源时抛出 Error。
  */

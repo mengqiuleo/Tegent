@@ -1083,7 +1083,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
    *
    * systemPromptCache 是 agentLoop 在会话开始时构建的“工具列表 + plan overlay”快照，
    * 跨轮复用是为了保住 OpenAI-compatible providers 的稳定前缀缓存。
-   * `/mcp refresh`、`/mcp auth <name>` 等会改变可见工具面的命令必须调用它。
+   * `/mcp refresh` 等会改变可见工具面的命令必须调用它。
    */
   const invalidateSystemPromptCache = useCallback(() => {
     if (loopStateRef.current) {

@@ -18,17 +18,9 @@ const PLUGINS_DIR_NAME = 'plugins'
 /**
  * 返回插件子系统的根目录。
  *
- * 查找顺序有两个覆盖开关：
- * - `XC_PLUGINS_DIR`：只覆盖插件目录，和 `XC_AGENTS_DIR` / `XC_SKILLS_DIR`
- *   的语义一致。测试只想隔离插件缓存、不想影响 MCP、配置和 OAuth 状态时优先用它。
- * - `X_CODE_HOME`：覆盖整个 `~/.tegent/` 根目录，由 {@link userXcodeDir}
- *   解析，因此配置、MCP 状态和插件目录都会一起迁移。
- *
- * @returns 插件根目录的绝对路径或用户提供的覆盖路径。
+ * @returns 插件根目录的绝对路径或用户提供的覆盖路径。 `~/.tegent/plugins/` 
  */
 export function pluginsRoot(): string {
-  const override = process.env.XC_PLUGINS_DIR
-  if (override) return override
   return path.join(userTeCodeDir(), PLUGINS_DIR_NAME)
 }
 
@@ -72,7 +64,7 @@ export function marketplaceIndexPath(name: string): string {
  * @returns `~/.tegent/plugins/cache/<marketplace>/<plugin>/`。
  */
 export function pluginCacheParent(marketplace: string, plugin: string): string {
-  return path.join(pluginsRoot(), 'cache', marketplace, plugin)
+  return path.join(pluginsRoot(), 'cache', marketplace, plugin) // 因为 cache/<marketplace>/<plugin>/<version>/
 }
 
 /**

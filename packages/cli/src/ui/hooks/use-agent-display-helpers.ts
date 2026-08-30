@@ -113,15 +113,13 @@ export function useAgentDisplayHelpers(appendMessage: (msg: DisplayMessage) => v
    * @returns 无返回值。
    *
    * 这个函数不会再次回显命令。
-   * 它适合 `/mcp refresh`、`/mcp auth` 这类多步骤 slash command：
+   * 它适合 `/mcp refresh` 这类多步骤 slash command：
    * 一次用户输入会产生一个随着异步流程逐步补全的紧凑结果块。
    *
    * ```text
-   * > /mcp auth sentry
-   *   ⎿  Authenticating "sentry" — opening browser...    (addCommandMessage)
-   *   ⎿  Opened https://...                              (addCommandResult)
-   *        Waiting for the authorization redirect...
-   *   ⎿  ✓ Authenticated "sentry" — 14 tools             (addCommandResult)
+   * > /mcp refresh
+   *   ⎿  Re-reading MCP config and reconnecting servers...   (addCommandMessage)
+   *   ⎿  Reloaded MCP — added: github; reconnected: weather. (addCommandResult)
    * ```
    *
    * 如果后续结果使用 `addInfoMessage`，每段都会被渲染成独立 assistant 块，

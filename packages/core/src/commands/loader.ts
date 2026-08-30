@@ -132,9 +132,6 @@ export interface LoadCommandsOptions {
  * 配合 CommandRegistry 的“同名后写覆盖”，最终优先级就是
  * **project > plugin > user**，与 skills 和 sub-agents 的规则一致。
  *
- * `userTeCodeDir()` 必须在加载时调用，因为测试会通过 `X_CODE_HOME` 重定向
- * 用户级目录；如果提前缓存路径，测试隔离会失效。
- *
  * @param opts - 可选的插件 command 目录集合。
  * @returns 按优先级插入顺序排列的 CommandDefinition 列表。
  */

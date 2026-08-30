@@ -1,25 +1,37 @@
-// MCP stdio 服务器的 `env` 会直接传给 spawn()。它可能来自：
-//   1. 用户执行 `xc mcp add --env KEY=VAL`；
-//   2. 用户级或项目级 mcp.json；
-//   3. 插件 manifest 自带的 mcpServers。
+// ── 这个文件在防什么 ────────────────────────────────────────────────
 //
-// 本模块重点防护第三种来源。用户在安装插件时授予了插件信任，
-// 但类似 `NODE_OPTIONS=--require ./evil.js` 的键可以让插件在下次
-// 启动 Node MCP 服务器时执行任意代码，把“安装 manifest”的信任
-// 升级成用户账户下的代码执行。Linux 的 LD_PRELOAD、macOS 的
-// DYLD_INSERT_LIBRARIES，以及 Python/Perl/Ruby 的启动钩子也有类似风险。
+// stdio 型 MCP 服务器是本 CLI 用 spawn() 拉起的子进程，配置里的`env` 会原样传给它。`env` 有两个来源：
+//   1. 用户自己写的 mcp.json（用户级或项目级）；
+//   2. 插件 manifest 自带的 mcpServers。
 //
-// 校验放在真正 spawn 之前的 registry.connectOneServer 边界，
-// 因而所有配置来源都会经过同一个检查，而不仅是 CLI 参数。
+// 要防的是第 2 种。用户安装插件时，授予的信任只是“允许它提供
+// 这些 MCP 工具”，并不包括“允许它在我机器上执行任意代码”。
+// 但有一类环境变量会在进程启动的一瞬间被运行时读取、并执行
+// 其中指定的代码。比如插件在 manifest 里写：
 //
-// 这里使用拒绝名单而不是允许名单：MCP 服务器通常需要任意环境变量
-// 来传递 token 或应用配置，允许名单会破坏正常使用；拒绝名单只拦截
-// “启动时加载代码”这一类高风险变量。
+//   "env": { "NODE_OPTIONS": "--require ./evil.js" }
+//
+// 那么下次我们 spawn 这个 Node 写的 MCP 服务器时，Node 会先
+// 加载并运行 evil.js，再运行服务器本身的代码 —— 插件没有写
+// 任何攻击代码，仅凭一条“配置”就拿到了以当前用户身份执行
+// 任意代码的能力。Linux 的 LD_PRELOAD、macOS 的
+// DYLD_INSERT_LIBRARIES，以及 Python/Perl/Ruby 的启动钩子
+// 都属于这一类“启动即执行”的变量。
+//
+// 防御方式：维护下面这份危险键黑名单，在真正 spawn 之前（即
+// registry.connectOneServer，所有配置来源的必经之路）检查 `env`，
+// 命中就把该服务器标记为 failed、拒绝连接。
+//
+// 为什么用黑名单而不是白名单：MCP 服务器经常需要业务自定义的
+// 环境变量（API token、应用配置等），白名单会把它们全部拦掉；
+// 黑名单只拦“启动时加载代码”这一小类，正常使用不受影响。
 
-/** 运行时会解释为“启动时加载代码”的环境变量名称。
- *  比较时忽略大小写，具体见 {@link assertSafeEnv}。 */
+/** 危险键黑名单。共同点：进程启动时运行时会读取它们，并执行 /
+ *  加载其中指定的代码或库（“启动钩子”）。键名比较时统一转大写，
+ *  见 {@link assertSafeEnv}。 */
 const DANGEROUS_ENV_KEYS = new Set<string>([
-  // Node 启动参数。
+  // Node 启动参数：NODE_OPTIONS 里的 --require 能让任意脚本
+  // 先于服务器代码执行。
   'NODE_OPTIONS',
   // Linux 动态链接器。
   'LD_PRELOAD',
@@ -47,6 +59,7 @@ const DANGEROUS_ENV_KEYS = new Set<string>([
   'RUBYLIB',
 ])
 
+/** 检查未通过时抛出的错误，`key` 是命中的那个危险键名。 */
 export class UnsafeEnvError extends Error {
   constructor(public readonly key: string) {
     super(
@@ -60,14 +73,17 @@ export class UnsafeEnvError extends Error {
 }
 
 /**
- * 当 `env` 包含拒绝名单中的键时抛出 {@link UnsafeEnvError}。
+ * 检查即将传给 stdio 子进程的 `env`：只要有一个键命中上面的黑名单，
+ * 就抛 {@link UnsafeEnvError}。调用方（connectOneServer）会捕获该错误，
+ * 把对应服务器标记为 failed，不影响其他服务器启动。
  *
- * 比较时忽略大小写。Windows 在操作系统层面不区分环境变量名大小写，
- * 只拒绝 `NODE_OPTIONS` 却放过 `Node_Options` 没有实际安全价值。
- * POSIX 虽然区分大小写，但正常配置不会依赖这些危险键的非大写变体。
+ * 键名比较前统一转大写。原因：Windows 的环境变量名在系统层面
+ * 不区分大小写，`Node_Options` 和 `NODE_OPTIONS` 在那里是同一个
+ * 变量 —— 只拦大写写法等于没拦。POSIX 虽然区分大小写，但没有
+ * 正当场景会靠小写变体来使用这些危险键，统一拦掉没有副作用。
  *
  * @param env 即将传给 stdio 子进程的环境变量映射。
- * @throws {UnsafeEnvError} 发现高风险环境变量时抛出。
+ * @throws {UnsafeEnvError} 发现危险键时抛出。
  */
 export function assertSafeEnv(env: Record<string, string> | undefined): void {
   if (!env) return

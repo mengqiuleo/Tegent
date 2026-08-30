@@ -1,21 +1,8 @@
 // 文件布局：
-//
+// user-config.json 是惰性创建的：只有 setPluginUserConfig 被调用时才会触发 writeFile 
 //   ~/.tegent/plugins/user-config.json    →  {
 //                                              [pluginId]: { [key]: <value> }
 //                                            }
-//
-// 存储格式是普通 JSON map；文件创建时使用 0600 权限（仅所有者可读写），
-// 尽量避免其他用户会话中的进程读取敏感值。这不是系统级密钥链的替代品
-// （macOS Keychain / Windows Credential Manager / Linux libsecret），只是一个
-// 避免引入原生构建复杂度的 v1 方案。`sensitive: true` 仍然会在输入阶段驱动
-// 掩码显示，只是静态存储目前仍放在同一个文件里。
-//
-// 未来可以把 `sensitive` 条目迁移到真正的密钥链。读取层届时可以合并 JSON
-// 文件和 keychain 两个来源，所以这个增强可以做到向后兼容。
-//
-// 为什么不把 sensitive 和 non-sensitive 拆成两个文件：它只会增加文件 IO，
-// 并不会提升安全边界，因为两个文件仍位于同一目录并使用同样权限。真正的保护
-// 需要系统密钥链；在那之前，一个文件更诚实也更简单。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -54,7 +41,7 @@ function userConfigPath(): string {
  */
 async function readFile(): Promise<UserConfigFile> {
   try {
-    const raw = await fs.readFile(userConfigPath(), 'utf-8')
+    const raw = await fs.readFile(userConfigPath(), 'utf-8') // 读取 `~/.tegent/plugins/user-config.json`
     const parsed = JSON.parse(raw) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return parsed as UserConfigFile

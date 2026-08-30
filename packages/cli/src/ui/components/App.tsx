@@ -112,8 +112,6 @@ export const SLASH_COMMANDS = [
       { name: 'add', description: 'Add a new MCP server (stdio or http) to user / project config' },
       { name: 'add-json', description: 'Add an MCP server from a raw JSON config object' },
       { name: 'remove', description: 'Remove an MCP server from config' },
-      { name: 'auth', description: 'Authenticate an HTTP MCP server via OAuth' },
-      { name: 'logout', description: 'Clear stored OAuth tokens for a server' },
       { name: 'refresh', description: 'Reload mcpServers from disk and reconnect' },
     ],
   },

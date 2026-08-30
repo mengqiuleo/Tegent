@@ -9,7 +9,6 @@
 // AbortSignal，并通过 `RequestOptions.signal` 传给 SDK。用户在工具调用
 // 期间按 Esc 时，agent loop 的 signal 会取消当前 SDK 请求，关闭这次
 // JSON-RPC future，但不会杀掉底层连接；下一次调用仍可复用同一 transport。
-import { type OAuthClientProvider, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -18,7 +17,6 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { Stream } from 'node:stream'
 
 import { VERSION } from '../version.js'
-import { McpOAuthProvider } from './oauth/provider.js'
 import {
   type McpCallResult,
   type McpResourceEntry,
@@ -35,7 +33,7 @@ import {
  */
 const STDERR_TAIL_LINES = 20
 
-const CLIENT_INFO = { name: 'tegent-cli', version: VERSION }
+const CLIENT_INFO = { name: 'tegent', version: VERSION }
 
 /**
  * 首次连接默认超时，单位毫秒。
@@ -53,22 +51,41 @@ export interface ConnectInfo {
 }
 
 export class McpClient {
-  /** SDK Client 实例；只有成功进入连接流程后才存在。 */
+  // ── 内部状态 ────────────────────────────────────────────────────────
+  //
+  //   registry ──► McpClient（本类）
+  //                 ├── client    ：SDK Client，协议层 —— 会说 MCP
+  //                 │              协议（initialize 握手、listTools、
+  //                 │              callTool、readResource）
+  //                 └── transport ：SDK Transport，传输层 —— 只管消息
+  //                                怎么送达：stdio 型 = 子进程的
+  //                                stdin/stdout 管道；HTTP 型 = 网络请求
+  //
+  // client / transport 为 null 就表示“当前没有活跃连接”：构造后、
+  // connect() 前，以及 close() 之后都处于这个状态。
+
+  /** SDK 协议层：所有 MCP 调用（listTools / callTool / readResource）
+   *  都发给它。connect() 时创建，close() 时置回 null。 */
   private client: Client | null = null
-  /** SDK transport；由本类持有，以便 `close()` 时能干净释放。 */
+  /** SDK 传输层：stdio 型就是被拉起的子进程（持有它的 stdin/stdout
+   *  管道），HTTP 型是一条网络连接。单独存引用是为了 close() 时能
+   *  彻底释放（杀掉子进程 / 断开连接）。 */
   private transport: Transport | null = null
-  /** stderr 的滚动尾部缓存，仅 stdio 服务器会写入。 */
+  /** 子进程 stderr 的滚动缓冲：只保留最后 STDERR_TAIL_LINES 行，
+   *  每来一行就 push，超了就丢最旧的。仅 stdio 型写入（HTTP 没有
+   *  stderr）。连接失败时 enrichError 会取末尾几行拼进报错，
+   *  `/mcp list` 通过 stderr() 读它来展示失败原因。 */
   private stderrTail: string[] = []
-  /** 最近一次连接枚举出的工具缓存，供 registry 安装工具表。 */
+  /** connect() 时 listTools() 拉回的工具清单。之后 tools() 直接返回
+   *  这份缓存、不再发请求；registry 安装工具表时也读它。 */
   private cachedTools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }> = []
-  /** 最近一次连接枚举出的 resource 缓存，供 registry 安装 resource 表。 */
+  /** 同 cachedTools，但缓存的是 listResources() 拉回的 resource 清单，
+   *  供 resources() 和 registry 使用。 */
   private cachedResources: McpResourceEntry[] = []
 
   constructor(
     public readonly serverName: string,
     private readonly config: McpServerConfig,
-    /** HTTP 服务器可选的 OAuth provider；stdio 服务器会忽略。 */
-    private readonly authProvider?: OAuthClientProvider,
   ) {}
 
   /**
@@ -94,16 +111,7 @@ export class McpClient {
     try {
       await this.client.connect(this.transport, { signal: ctrl.signal })
     } catch (err) {
-      // OAuth 流程中抛 UnauthorizedError 是预期行为：
-      // SDK 已经调用 redirectToAuthorization，现在需要调用方在同一个
-      // transport 上执行 finishAuth(code)。如果这里关闭连接，
-      // runOAuthDance 会丢失 transport 句柄，无法完成 token 交换。
-      // 所以 UnauthorizedError 时暂时保留 client + transport，
-      // 由 runOAuthDance 或后续 finally 路径清理；其他错误仍然 safeClose，
-      // 避免泄漏子进程或 HTTP 连接。
-      if (!isUnauthorizedError(err)) {
-        await this.safeClose()
-      }
+      await this.safeClose()
       throw this.enrichError(err)
     } finally {
       clearTimeout(timer)
@@ -161,109 +169,6 @@ export class McpClient {
    */
   resources(): ReadonlyArray<McpResourceEntry> {
     return this.cachedResources
-  }
-
-  /**
-   * 执行一次完整的交互式 OAuth 连接流程。
-   *
-   * MCP SDK 的 StreamableHTTP transport 采用懒认证：没有已保存 token 时，
-   * 首次 connect 会调用 `authProvider.redirectToAuthorization`，随后抛出
-   * `UnauthorizedError`，因为 token 交换必须等用户在浏览器中授权并跳回。
-   * 调用方需要等待本地回调拿到授权码，把 code 交给
-   * `transport.finishAuth(code)`，再重试 connect；第二次连接时 token
-   * 已保存，握手即可成功。
-   *
-   * 本方法把这整套流程封装起来，让 `/mcp auth` 只需选择“驱动 OAuth
-   * 到完成”，不必理解 finishAuth 细节。默认 `connect()` 会让 OAuth
-   * provider 处于被动模式：只有这里调用 `setInteractive(true)` 后，
-   * `redirectToAuthorization` 才会真正打开浏览器，从而避免 CLI 启动时
-   * 对 `needs_auth` 服务器突然弹出浏览器窗口。
-   *
-   * @param hooks 可选的 UI 回调，用于在浏览器打开前向用户展示授权 URL。
-   * @returns OAuth 完成后的连接能力统计。
-   */
-  async connectWithOAuth(hooks: { onBrowserOpen?: (url: string) => void } = {}): Promise<ConnectInfo> {
-    if (!this.authProvider) {
-      throw new Error(`MCP server "${this.serverName}" has no OAuth provider configured`)
-    }
-    if (!(this.authProvider instanceof McpOAuthProvider)) {
-      // 允许第三方 provider 自己处理 OAuth；此时无法使用本类的
-      // waitForAuthCode 钩子，直接走普通 connect。
-      return this.connect()
-    }
-
-    const provider = this.authProvider
-
-    // 提前启动本地回调服务器，让真实 loopback 端口在 SDK 构造动态注册请求前
-    // 就写入 `clientMetadata.redirect_uris` 和 `redirectUrl`。
-    // 否则我们会用不带端口的占位 redirect_uri 注册；Sentry 等不完全接受
-    // RFC 8252 §7.3 “loopback 任意端口”规则的认证服务器，会拒绝授权 URL
-    // 中带真实端口的 redirect_uri。
-    await provider.prepareForAuth()
-
-    // 将浏览器打开通知同时转发给调用方 hook，这样 /mcp auth 处理器可以把
-    // “正在打开浏览器”的提示写入 CLI scrollback。
-    // provider 没有事件 API，所以这里临时 monkey-patch 当前实例的方法；
-    // patch 只存在于本次调用的 try/finally 生命周期内，边界足够明确。
-    const originalRedirect = provider.redirectToAuthorization.bind(provider)
-    if (hooks.onBrowserOpen) {
-      provider.redirectToAuthorization = async (url: URL) => {
-        try {
-          hooks.onBrowserOpen?.(url.toString())
-        } catch {
-          // UI hook 失败不能中断 OAuth 主流程。
-        }
-        return originalRedirect(url)
-      }
-    }
-    try {
-      return await this.runOAuthDance()
-    } finally {
-      provider.setInteractive(false)
-      if (hooks.onBrowserOpen) {
-        provider.redirectToAuthorization = originalRedirect
-      }
-    }
-  }
-
-  /**
-   * 实际执行 OAuth 的两阶段连接。
-   *
-   * 第一阶段触发浏览器跳转并等待 UnauthorizedError；随后等待用户授权回调，
-   * 调用 finishAuth 完成 token 交换；第二阶段重新连接并得到真正会话。
-   * 两次尝试共用同一组工具 / resource 缓存字段，最终由成功的第二次连接填充。
-   *
-   * @returns 授权完成后的连接能力统计。
-   */
-  private async runOAuthDance(): Promise<ConnectInfo> {
-    const provider = this.authProvider as McpOAuthProvider
-
-    // 第一次尝试通常会在打开浏览器后抛 UnauthorizedError。
-    // 如果磁盘上恰好已有有效 token，则 connect 会直接成功并提前返回。
-    try {
-      return await this.connect()
-    } catch (err) {
-      // 不是“需要等待用户授权”的错误都继续向外抛出。
-      if (!isUnauthorizedError(err)) {
-        provider.cancel()
-        throw err
-      }
-    }
-
-    // provider 已经被 SDK 调用过 redirectToAuthorization。
-    // 现在等待用户从浏览器跳回本地 callback server，再完成 token 交换。
-    const { code } = await provider.waitForAuthCode()
-    const transport = this.transport
-    if (!(transport instanceof StreamableHTTPClientTransport)) {
-      throw new Error(`Internal error: OAuth flow expected an HTTP transport for "${this.serverName}"`)
-    }
-    await transport.finishAuth(code)
-
-    // token 已保存。第一次 connect 在握手中途抛错，client + transport
-    // 处于半开状态；为了避免“已经连接”或状态泄漏，先关闭再重建 transport，
-    // 让第二次 initialize 往返发生在干净连接上。
-    await this.safeClose()
-    return this.connect()
   }
 
   /**
@@ -358,7 +263,6 @@ export class McpClient {
     if (isHttpConfig(this.config)) {
       return new StreamableHTTPClientTransport(new URL(this.config.url), {
         requestInit: this.config.headers ? { headers: this.config.headers } : undefined,
-        authProvider: this.authProvider,
       })
     }
 
@@ -404,25 +308,6 @@ export class McpClient {
     enriched.stack = base.stack
     return enriched
   }
-}
-
-/**
- * 判断错误是否代表 SDK 的 UnauthorizedError。
- *
- * 这里不只依赖 instanceof，因为打包或依赖重复安装时，
- * 同名类可能来自不同 esm/cjs 根路径，instanceof 会失效。
- * 因此同时检查 SDK 导出的类、错误名称和常见 401 文案。
- *
- * @param err 任意错误值。
- * @returns 认为是未授权错误时返回 `true`。
- */
-function isUnauthorizedError(err: unknown): boolean {
-  if (err instanceof UnauthorizedError) return true
-  if (err instanceof Error) {
-    if (err.name === 'UnauthorizedError') return true
-    if (/unauthorized|401/i.test(err.message)) return true
-  }
-  return false
 }
 
 /**

@@ -110,14 +110,14 @@ export async function loadAllPlugins(opts: LoadOptions): Promise<LoadResult> {
   const enableState = await EnableState.load(opts.cwd)
   const plugins: LoadedPlugin[] = []
   const errors: PluginLoadError[] = []
-  const contributions = new Map<string, ResolvedContributions>()
+  const contributions = new Map<string, ResolvedContributions>() // plugin id -> 贡献项解析结果（结果其实就是 plugin.json，要求 plugin.json 中的路径均为绝对路径）
 
   // ── 第 1 轮：user-scope 已安装插件 ───────────────────────────────────
   const installed = await listInstalledPlugins()
   for (const record of installed) {
     const rootDir = pluginCacheDir(record.marketplace, record.name, record.version)
-    await loadOnePlugin({
-      rootDir,
+    await loadOnePlugin({ // 插件加载，
+      rootDir, // 读取的是 cache 目录的路径
       fallbackId: record.id,
       marketplace: record.marketplace,
       scope: record.installScope,
@@ -293,7 +293,7 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
     for (const conv of ['.mcp.json', 'mcp.json']) {
       const p = path.join(root, conv)
       if (await isFile(p)) {
-        result.mcpServers = { kind: 'path', path: p }
+        result.mcpServers = { kind: 'path', path: p } // path 一般为 `~/.tegent/plugins/<name>/mcp.json` 或 `<cwd>/.tegent/plugins/<name>/mcp.json`
         break
       }
     }
@@ -307,9 +307,9 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
       result.hooks = { kind: 'inline', data: m.hooks }
     }
   } else {
-    const conv = path.join(root, 'hooks', 'hooks.json')
+    const conv = path.join(root, 'hooks', 'hooks.json') 
     if (await isFile(conv)) {
-      result.hooks = { kind: 'path', path: conv }
+      result.hooks = { kind: 'path', path: conv } // path 一般为 `~/.tegent/plugins/<name>/hooks/hooks.json` 或 `<cwd>/.tegent/plugins/<name>/hooks/hooks.json`
     }
   }
 

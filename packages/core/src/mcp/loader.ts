@@ -1,7 +1,7 @@
 // 这是 CLI 入口调用的一次性编排流程：读取用户级和项目级配置，
 // 对项目级内容执行信任门校验，展开环境变量，并行启动 / 连接
 // 每个启用的服务器，最后构建一个 registry，供后续 `/mcp refresh`
-// 和 `/mcp auth` 继续修改。单个服务器失败不会阻止整个启动，
+// 继续修改。单个服务器失败不会阻止整个启动，
 // `/mcp list` 会把失败原因展示给用户。
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -13,7 +13,6 @@ import { buildCallableName as buildCallable } from './name-mangling.js'
 import {
   type ConnectResult,
   McpRegistry,
-  type OAuthProviderFactory,
   type RegisteredServer,
   connectOneServer,
   emptyRegistry,
@@ -22,7 +21,6 @@ import { type TrustChoice, buildServerPreview, isProjectTrusted, promptForTrust,
 import { type McpResourceEntry, type McpServerConfig, type McpToolEntry } from './types.js'
 
 // 为历史调用方重新导出这些类型，避免旧 import 失效。
-export type { OAuthProviderFactory }
 export type { RegisteredServer, ConnectResult }
 export type { McpResourceEntry, McpToolEntry }
 
@@ -40,9 +38,6 @@ export interface LoadOptions {
   projectPath: string
   /** 渲染信任对话框，形状与 `AgentCallbacks.onAskUser` 相同。 */
   askUser: (question: string, options: Array<{ label: string; description: string }>) => Promise<string>
-  /** OAuth provider 工厂。可选；传 undefined 时表示禁用 OAuth，
-   *  需要认证的 HTTP 服务器会被标记为 `needs_auth`。 */
-  oauthProviderFor?: OAuthProviderFactory
   /** loader 决定终止进程时调用；CLI 层会把它接到干净的关闭流程。
    *  默认是 no-op，具体退出责任由调用方承担。 */
   onExitRequested?: () => void
@@ -66,7 +61,6 @@ export interface LoadResult {
 export async function loadMcpFromDisk(opts: {
   cwd: string
   askUser: LoadOptions['askUser']
-  oauthProviderFor?: OAuthProviderFactory
   onExitRequested?: () => void
   /** 插件贡献的 mcpServers：已经被信任，会与用户级服务器一起并入
    *  有效配置。由 packages/core/src/plugins/integration.ts 构建。 */
@@ -80,7 +74,6 @@ export async function loadMcpFromDisk(opts: {
     extraServers: opts.extraServers,
     projectPath: opts.cwd,
     askUser: opts.askUser,
-    oauthProviderFor: opts.oauthProviderFor,
     onExitRequested: opts.onExitRequested,
   })
 }
@@ -154,11 +147,7 @@ export async function loadMergedConfigsFromDisk(opts: {
   return { configs: merged, configErrors, projectSkipped }
 }
 
-/**
- * 纯 loader（不负责读取配置文件，调用方把配置注入进来）。
- *
- * 这样更容易测试，也让 CLI 自己控制配置来源。
- */
+
 export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> {
   const configErrors: Array<{ name: string; message: string }> = []
   let projectSkipped = false
@@ -207,10 +196,9 @@ export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> 
   }
 
   // 任意地方都没有配置服务器时，直接走空 registry 快速路径。
-  // 这里仍然保留 oauthFactory，方便后续刷新或重建时继续使用。
   if (Object.keys(merged).length === 0) {
     return {
-      registry: new McpRegistry({ servers: [], tools: [], resources: [], oauthFactory: options.oauthProviderFor }),
+      registry: new McpRegistry({ servers: [], tools: [], resources: [] }),
       configErrors,
       projectSkipped,
     }
@@ -218,7 +206,7 @@ export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> 
 
   // 并行启动 / 连接。每个服务器的 promise 独立处理，避免单个超时拖垮整个启动。
   const tasks = Object.entries(merged).map(async ([name, rawConfig]) => {
-    return connectOneServer(name, rawConfig, options.oauthProviderFor)
+    return connectOneServer(name, rawConfig)
   })
   const results = await Promise.all(tasks)
 
@@ -252,7 +240,6 @@ export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> 
     tools,
     resources,
     configs,
-    oauthFactory: options.oauthProviderFor,
   })
 
   return { registry, configErrors, projectSkipped }
