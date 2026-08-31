@@ -1,11 +1,9 @@
-// 这个模块从 useAgent 中拆出，用一个小型子 hook 包装 `appendMessage`。
-// `appendMessage` 是会触发 setState 更新的底层追加函数。
 // 这里提供五种 App 的 slash command 处理器常用的消息追加形态。
 // 使用子 hook 而不是普通函数，是因为每个返回函数都由 useCallback 创建，
 // 下游消费者依赖这些函数稳定的 memo identity 来避免不必要的更新。
-import { useCallback } from 'react' // 导入 React 的 useCallback，用来稳定回调函数引用。
+import { useCallback } from 'react' 
 
-import type { DisplayMessage } from '@tegent/core' // 导入 UI 展示消息类型，只在类型检查阶段使用。
+import type { DisplayMessage } from '@tegent/core'
 
 /**
  * 创建一组向 UI 回滚区追加消息的辅助函数。
@@ -17,13 +15,13 @@ export function useAgentDisplayHelpers(appendMessage: (msg: DisplayMessage) => v
   const addMessage = useCallback(
     (role: 'user' | 'assistant', content: string) => {
       appendMessage({
-        id: Date.now().toString(), // 使用当前时间戳生成简单消息 id。
-        role, // 保留调用方传入的消息角色。
-        content, // 保留调用方传入的消息正文。
-        timestamp: Date.now(), // 用当前时间记录消息时间戳。
+        id: Date.now().toString(),
+        role,
+        content,
+        timestamp: Date.now(),
       })
     },
-    [appendMessage], // 当底层追加函数变化时，重新创建包装回调。
+    [appendMessage],
   )
 
   /**
@@ -58,14 +56,14 @@ export function useAgentDisplayHelpers(appendMessage: (msg: DisplayMessage) => v
   const echoCommand = useCallback(
     (content: string) => {
       appendMessage({
-        id: `cmd-${Date.now()}`, // 用命令前缀和时间戳生成命令回显 id。
-        role: 'user', // 命令回显属于用户输入。
-        content, // 保存原始命令文本。
-        timestamp: Date.now(), // 记录回显生成时间。
-        kind: 'command-echo', // 标记为命令回显，供渲染层使用紧凑样式。
+        id: `cmd-${Date.now()}`,
+        role: 'user', 
+        content, 
+        timestamp: Date.now(),
+        kind: 'command-echo',
       })
     },
-    [appendMessage], // 依赖底层追加函数，保持闭包中的函数是最新的。
+    [appendMessage],
   )
 
   /**
@@ -87,23 +85,23 @@ export function useAgentDisplayHelpers(appendMessage: (msg: DisplayMessage) => v
    */
   const addCommandMessage = useCallback(
     (commandText: string, resultText: string) => {
-      const base = Date.now() // 复用同一个时间戳，让命令和结果拥有相邻且稳定的 id。
+      const base = Date.now() 
       appendMessage({
-        id: `cmd-${base}`, // 生成命令回显消息 id。
-        role: 'user', // 命令本身作为用户消息展示。
-        content: commandText, // 保存命令文本。
-        timestamp: base, // 命令消息使用共享时间戳。
-        kind: 'command-echo', // 标记为命令回显样式。
+        id: `cmd-${base}`, 
+        role: 'user', 
+        content: commandText, 
+        timestamp: base, 
+        kind: 'command-echo',
       })
       appendMessage({
-        id: `cmd-res-${base}`, // 生成与命令同批次的结果消息 id。
-        role: 'assistant', // 命令结果作为 assistant 输出展示。
-        content: resultText, // 保存结果文本。
-        timestamp: base, // 结果消息使用同一个时间戳，保持排序紧邻。
-        kind: 'command-result', // 标记为命令结果样式。
+        id: `cmd-res-${base}`, 
+        role: 'assistant',
+        content: resultText,
+        timestamp: base, 
+        kind: 'command-result', 
       })
     },
-    [appendMessage], // appendMessage 变化时重新创建回调。
+    [appendMessage],
   )
 
   /**
@@ -127,17 +125,17 @@ export function useAgentDisplayHelpers(appendMessage: (msg: DisplayMessage) => v
    */
   const addCommandResult = useCallback(
     (content: string) => {
-      const base = Date.now() // 用当前时间戳生成本条结果的唯一 id。
+      const base = Date.now() 
       appendMessage({
-        id: `cmd-res-${base}`, // 生成命令结果消息 id。
-        role: 'assistant', // 命令结果属于 assistant 输出。
-        content, // 保存结果正文。
-        timestamp: base, // 记录结果生成时间。
+        id: `cmd-res-${base}`,
+        role: 'assistant',
+        content, 
+        timestamp: base,
         kind: 'command-result', // 标记为命令结果样式，渲染为紧凑 `⎿` 行。
       })
     },
-    [appendMessage], // 依赖底层追加函数，确保调用最新实现。
+    [appendMessage],
   )
 
-  return { addInfoMessage, addUserMessage, echoCommand, addCommandMessage, addCommandResult } // 暴露所有展示辅助回调。
+  return { addInfoMessage, addUserMessage, echoCommand, addCommandMessage, addCommandResult }
 }

@@ -40,13 +40,6 @@ interface AppProps {
   model: LanguageModel
   options: AgentOptions
   onCleanupReady?: (fn: () => Promise<void>) => void
-  /**
-   * 向 Ink 卸载后的恢复提示提供一份实时会话快照。
-   *
-   * app.tsx 会注册这个 getter；index.ts 的 gracefulShutdown 在终端复位后调用它，
-   * 在 shell prompt 区域打印 “Resume this session: start tegent and run /resume”，
-   * 方便用户下次进入 TUI 后用 /resume 在选择器里认出这次会话。
-   */
   onSessionInfoReady?: (getter: () => { sessionId: string; taskSlug: string; messageCount: number } | null) => void
 }
 
@@ -352,10 +345,6 @@ export function App({
           return
 
         case 'clear':
-          // 不 echo，也不输出结果消息。
-          // ChatInput 的 shrink-detection 路径会清空可见终端和滚动历史，
-          // 让用户看到只剩输入框的空视口。若再加一行 “Conversation cleared.”，
-          // 清空后的屏幕会立刻从第 1 行重新绘制，破坏用户想要的“刚启动”观感。
           pendingSkillRef.current = null
           clear()
           return
@@ -422,7 +411,6 @@ export function App({
           return
 
         default: {
-          // 先检查命令是否命中已加载的 skill。
           const skill = options.skillRegistry?.get(command)
           if (skill) {
             if (arg) {
@@ -931,7 +919,7 @@ export function App({
   return (
     <ChatInput
       messages={state.messages}
-      initialContentRows={getHeaderRowCount(state.modelId)}
+      // initialContentRows={getHeaderRowCount(state.modelId)}
       onSubmit={handleSubmit}
       onInterrupt={handleCtrlC}
       onEscapeCancel={abort}

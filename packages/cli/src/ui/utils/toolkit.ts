@@ -16,20 +16,20 @@ import { getToolInputPreview } from '../utils.js'
  */
 export function extractLastAssistantText(messages: ModelMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] // 从后往前读取消息，优先找到最近的 assistant 回复。
-    if (msg.role !== 'assistant') continue // 只关心 assistant 消息，其它角色跳过。
-    const content = msg.content // 读取 assistant 消息内容。
-    if (typeof content === 'string') return content // 字符串内容可直接返回。
-    if (!Array.isArray(content)) return '' // 非数组且非字符串的内容无法提取文本。
-    const parts: string[] = [] // 收集数组内容中的 text 片段。
+    const msg = messages[i] 
+    if (msg.role !== 'assistant') continue
+    const content = msg.content 
+    if (typeof content === 'string') return content 
+    if (!Array.isArray(content)) return ''
+    const parts: string[] = [] 
     for (const part of content as Array<{ type: string; text?: string }>) {
       if (part.type === 'text' && typeof part.text === 'string') {
-        parts.push(part.text) // 只拼接显式 text 片段。
+        parts.push(part.text) 
       }
     }
-    return parts.join('') // 同一条 assistant 消息内的文本片段按顺序拼接。
+    return parts.join('')
   }
-  return '' // 没有 assistant 消息时返回空字符串。
+  return ''
 }
 
 
@@ -240,13 +240,11 @@ export function renderMessageLabel(msg: DisplayMessage): string {
  * @returns 是否命中。
  */
 export function fuzzyMatches(target: string, query: string): boolean {
-  // qi 指向 query 当前等待匹配的字符。
   let qi = 0
-  // ti 从左到右扫描 target；只要顺序能对上，就认为 fuzzy 命中。
+
   for (let ti = 0; ti < target.length && qi < query.length; ti++) {
-    // 当前 target 字符命中 query 当前字符时，推进 query 指针。
     if (target[ti] === query[qi]) qi++
   }
-  // query 每个字符都被按顺序匹配到，才算命中。
+
   return qi === query.length
 }

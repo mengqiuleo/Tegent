@@ -47,7 +47,7 @@ export function parseBooleanArg(s: string): boolean | null {
     return true // 命中真值别名时返回 true。
   if (trimmed === 'off' || trimmed === 'false' || trimmed === '0' || trimmed === 'disable' || trimmed === 'disabled')
     return false // 命中假值别名时返回 false。
-  return null // 未命中任何受支持写法时交给调用方处理。
+  return null
 }
 
 // 时长格式化
@@ -85,14 +85,14 @@ export interface DurationFmtOptions {
  * 大于等于 60 秒时返回分钟和秒，例如 `"2m 15s"`；紧凑模式且秒为 0 时返回 `"2m"`。
  */
 export function formatDuration(ms: number, opts: DurationFmtOptions = {}): string {
-  const { precision = 1, compact = false } = opts // 解构选项，并为精度和紧凑模式提供默认值。
-  if (ms < 1000) return `${ms}ms` // 小于 1 秒时直接显示毫秒，避免出现 `0.xs`。
-  const seconds = ms / 1000 // 把毫秒转换为秒，供后续分支统一计算。
-  if (seconds < 60) return `${seconds.toFixed(precision)}s` // 小于 1 分钟时按指定精度保留小数。
-  const minutes = Math.floor(seconds / 60) // 取完整分钟数，向下取整避免提前进位。
-  const secs = Math.round(seconds % 60) // 取剩余秒数并四舍五入，展示更自然。
-  if (compact && secs === 0) return `${minutes}m` // 紧凑模式下省略无信息量的 `0s`。
-  return `${minutes}m ${secs}s` // 默认显示分钟和剩余秒数。
+  const { precision = 1, compact = false } = opts 
+  if (ms < 1000) return `${ms}ms` 
+  const seconds = ms / 1000 
+  if (seconds < 60) return `${seconds.toFixed(precision)}s`
+  const minutes = Math.floor(seconds / 60) 
+  const secs = Math.round(seconds % 60) 
+  if (compact && secs === 0) return `${minutes}m` 
+  return `${minutes}m ${secs}s` 
 }
 
 // 工具展示辅助函数
@@ -104,7 +104,7 @@ export function formatDuration(ms: number, opts: DurationFmtOptions = {}): strin
  * @returns 小写且移除 `_`、`-` 后的工具名称。
  */
 function normalizeToolName(name: string): string {
-  return name.toLowerCase().replace(/[_-]/g, '') // 统一大小写，并抹平 snake_case 与 kebab-case 的差异。
+  return name.toLowerCase().replace(/[_-]/g, '') 
 }
 
 /**
@@ -114,7 +114,7 @@ function normalizeToolName(name: string): string {
  * @returns 工具可按只读分组折叠时返回 `true`，否则返回 `false`。
  */
 export function isCollapsibleReadOnlyTool(toolName: string): boolean {
-  return COLLAPSIBLE_READ_ONLY_TOOLS.has(normalizeToolName(toolName)) // 先归一化名称，再查询白名单集合。
+  return COLLAPSIBLE_READ_ONLY_TOOLS.has(normalizeToolName(toolName))
 }
 
 /**
@@ -139,8 +139,8 @@ const COLLAPSIBLE_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
  * @returns 路径最后一级名称；如果没有分隔符，则返回原始字符串。
  */
 export function basename(p: string): string {
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) // 同时查找 POSIX 和 Windows 路径分隔符的位置。
-  return i >= 0 ? p.slice(i + 1) : p // 找到分隔符时截取最后一级，否则说明原值已是 basename。
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) 
+  return i >= 0 ? p.slice(i + 1) : p 
 }
 
 /**
@@ -159,22 +159,22 @@ const SHELL_LABELS: Record<string, string> = {
  * @returns 适合展示给用户的工具标签。
  */
 export function getToolLabel(toolName: string): string {
-  const n = normalizeToolName(toolName) // 归一化名称，让后续判断不受大小写、下划线或连字符影响。
-  if (n === 'shell' || n === 'bash') return SHELL_LABELS[getShellProvider().type] ?? 'Shell' // shell 类工具展示当前 shell 类型。
-  if (n === 'readfile' || n === 'read') return 'Read' // 文件读取工具统一展示为 Read。
-  if (n === 'writefile' || n === 'write') return 'Write' // 文件写入工具统一展示为 Write。
-  if (n === 'edit' || n === 'update') return 'Update' // 文件编辑或更新工具统一展示为 Update。
-  if (n === 'glob') return 'Glob' // glob 工具保留其标准名称。
-  if (n === 'grep' || n === 'search') return 'Grep' // 文本搜索类工具统一展示为 Grep。
-  if (n === 'listdir' || n === 'ls') return 'ListDir' // 目录列表工具统一展示为 ListDir。
-  if (n === 'websearch') return 'WebSearch' // 网页搜索工具展示为 WebSearch。
-  if (n === 'webfetch') return 'WebFetch' // 网页获取工具展示为 WebFetch。
-  if (n === 'askuser') return 'AskUser' // 询问用户工具展示为 AskUser。
-  if (n === 'enterplanmode') return 'EnterPlanMode' // 进入计划模式工具展示为 EnterPlanMode。
-  if (n === 'exitplanmode') return 'ExitPlanMode' // 退出计划模式工具展示为 ExitPlanMode。
-  if (n === 'task') return 'Task' // 子代理任务工具展示为 Task。
-  if (n === 'todowrite') return 'TodoWrite' // 待办写入工具展示为 TodoWrite。
-  return toolName // 未识别的工具保持原名，避免丢失信息。
+  const n = normalizeToolName(toolName)
+  if (n === 'shell' || n === 'bash') return SHELL_LABELS[getShellProvider().type] ?? 'Shell'
+  if (n === 'readfile' || n === 'read') return 'Read'
+  if (n === 'writefile' || n === 'write') return 'Write'
+  if (n === 'edit' || n === 'update') return 'Update' 
+  if (n === 'glob') return 'Glob' 
+  if (n === 'grep' || n === 'search') return 'Grep' 
+  if (n === 'listdir' || n === 'ls') return 'ListDir'
+  if (n === 'websearch') return 'WebSearch' 
+  if (n === 'webfetch') return 'WebFetch'
+  if (n === 'askuser') return 'AskUser' 
+  if (n === 'enterplanmode') return 'EnterPlanMode'
+  if (n === 'exitplanmode') return 'ExitPlanMode' 
+  if (n === 'task') return 'Task' 
+  if (n === 'todowrite') return 'TodoWrite' 
+  return toolName 
 }
 
 /**
@@ -185,44 +185,44 @@ export function getToolLabel(toolName: string): string {
  * @returns 简短的输入预览；找不到合适字段时返回空字符串。
  */
 export function getToolInputPreview(toolName: string, input: Record<string, unknown>): string {
-  const n = normalizeToolName(toolName) // 归一化工具名称，后续按工具类型选择预览字段。
+  const n = normalizeToolName(toolName) 
 
   if (n === 'shell' || n === 'bash') {
-    return (input.command as string) || '' // shell 工具优先展示命令文本。
+    return (input.command as string) || '' 
   }
 
   if (n === 'readfile' || n === 'read' || n === 'writefile' || n === 'write' || n === 'edit' || n === 'update') {
-    return (input.filePath as string) || (input.file_path as string) || (input.path as string) || '' // 文件工具展示路径字段。
+    return (input.filePath as string) || (input.file_path as string) || (input.path as string) || '' 
   }
 
   if (n === 'listdir' || n === 'ls') {
-    return (input.dirPath as string) || (input.dir_path as string) || (input.path as string) || '' // 目录工具展示目录路径字段。
+    return (input.dirPath as string) || (input.dir_path as string) || (input.path as string) || ''
   }
 
   if (n === 'glob' || n === 'grep' || n === 'search') {
-    return (input.pattern as string) || (input.query as string) || '' // 搜索工具展示 pattern 或 query。
+    return (input.pattern as string) || (input.query as string) || '' 
   }
 
   if (n === 'websearch' || n === 'webfetch') {
-    return (input.query as string) || (input.url as string) || '' // 网页工具展示查询词或 URL。
+    return (input.query as string) || (input.url as string) || ''
   }
 
   if (n === 'task') {
-    return (input.description as string) || '' // 子任务工具展示任务描述。
+    return (input.description as string) || '' 
   }
 
   if (n === 'askuser') {
-    const q = (input.question as string) || '' // 读取问题文本，没有问题时使用空字符串。
-    const firstLine = q.split(/\r?\n/)[0]?.trim() || '' // 只取第一行，避免预览占用太多垂直空间。
-    return firstLine // 返回清理过的第一行问题。
+    const q = (input.question as string) || ''
+    const firstLine = q.split(/\r?\n/)[0]?.trim() || '' 
+    return firstLine
   }
 
-  // 兜底策略：展示第一个不超过 100 个字符的字符串值，不使用 JSON.stringify 以免 UI 噪声过大。
+
   for (const val of Object.values(input)) {
-    if (typeof val === 'string' && val.length <= 100) return val // 找到简短字符串就直接作为预览返回。
+    if (typeof val === 'string' && val.length <= 100) return val 
   }
 
-  return '' // 没有可读字段时返回空预览。
+  return '' 
 }
 
 /**
@@ -295,11 +295,11 @@ export function formatReadGroupSummary(tools: readonly DisplayToolCall[]): ReadG
   let detail: string | undefined // 详情默认不存在，只有读到文件路径时才生成。
   if (readPaths.length > 0) {
     const shown = readPaths.slice(0, 3).join(', ') // 最多直接展示前三个文件名。
-    const rest = readPaths.length > 3 ? `, +${readPaths.length - 3} more` : '' // 超过三个时展示剩余数量。
-    detail = shown + rest // 拼接直接展示的文件名和剩余数量提示。
+    const rest = readPaths.length > 3 ? `, +${readPaths.length - 3} more` : ''
+    detail = shown + rest 
   }
 
-  return detail ? { label, detail } : { label } // 有详情时返回完整对象，否则只返回标题。
+  return detail ? { label, detail } : { label }
 }
 
 /**
@@ -311,8 +311,8 @@ export function formatReadGroupSummary(tools: readonly DisplayToolCall[]): ReadG
  * @returns 适合展示在工具结果标题行的摘要；没有摘要需求时返回 `null`。
  */
 export function getToolResultSummary(toolName: string, output: string | undefined, status: string): string | null {
-  if (status === 'denied') return 'Denied by user' // 用户拒绝权限时优先展示拒绝状态。
-  if (!output) return 'Done' // 没有输出通常表示工具已完成但没有额外内容。
+  if (status === 'denied') return 'Denied by user'
+  if (!output) return 'Done' 
 
   // 下面的逐工具成功摘要只适用于成功路径。
   // 例如 "Wrote file" 或 "Applied changes" 在错误场景里会误导用户。
@@ -320,7 +320,7 @@ export function getToolResultSummary(toolName: string, output: string | undefine
   // 因此这里先返回简短错误标签，让下方 markdown 正文承载真实错误文本。
   if (status === 'error') return 'Failed' // 错误状态统一展示 Failed，避免误用成功摘要。
 
-  const n = normalizeToolName(toolName) // 归一化工具名称，后续按工具类型处理输出。
+  const n = normalizeToolName(toolName)
 
   if (n === 'writefile' || n === 'write') {
     const m = output.match(/\((\d+) lines?\)/) // 从写入结果里提取行数，例如 `(12 lines)`。
@@ -339,9 +339,9 @@ export function getToolResultSummary(toolName: string, output: string | undefine
 
   if (n === 'listdir' || n === 'ls') {
     const entries = output
-      .trim() // 去掉首尾空白，避免产生空条目。
-      .split('\n') // 按行拆分目录输出。
-      .filter((l) => l.trim()) // 去掉空行。
+      .trim() 
+      .split('\n') 
+      .filter((l) => l.trim())
     return entries.length <= 6
       ? entries.join('\n') // 条目较少时完整展示。
       : entries.slice(0, 3).join('\n') + `\n... +${entries.length - 3} items` // 条目较多时展示前三项和剩余数量。
@@ -349,17 +349,17 @@ export function getToolResultSummary(toolName: string, output: string | undefine
 
   if (n === 'glob') {
     const files = output
-      .trim() // 去掉首尾空白。
-      .split('\n') // 按行拆分匹配到的文件。
-      .filter((l) => l.trim()) // 去掉空行。
+      .trim()
+      .split('\n') 
+      .filter((l) => l.trim()) 
     return `${files.length} file${files.length !== 1 ? 's' : ''} matched` // 展示匹配文件数量，并处理复数。
   }
 
   if (n === 'grep' || n === 'search') {
     const lines = output
-      .trim() // 去掉首尾空白。
-      .split('\n') // 按行拆分搜索结果。
-      .filter((l) => l.trim()) // 去掉空结果行。
+      .trim() 
+      .split('\n') 
+      .filter((l) => l.trim()) 
     return `${lines.length} result${lines.length !== 1 ? 's' : ''}` // 展示搜索结果数量，并处理复数。
   }
 
@@ -368,9 +368,9 @@ export function getToolResultSummary(toolName: string, output: string | undefine
     const resultMatch = output.match(/<task_result>\n?([\s\S]*?)\n?<\/task_result>/) // 提取子任务正文结果。
     const body = resultMatch ? resultMatch[1]! : output.replace(/<task_stats[^/]*\/>/, '').trim() // 优先使用正文标签内容，否则移除统计标签后作为正文。
     const lines = body
-      .trim() // 去掉正文首尾空白。
-      .split('\n') // 按行拆分正文。
-      .filter((l) => l.trim()) // 过滤空行，摘要只保留实际文本。
+      .trim() 
+      .split('\n') 
+      .filter((l) => l.trim()) 
 
     if (statsMatch) {
       const toolCalls = parseInt(statsMatch[1]!, 10) // 解析子任务内部工具调用次数。
@@ -396,18 +396,18 @@ export function getToolResultSummary(toolName: string, output: string | undefine
   }
 
   if (n === 'shell' || n === 'bash') {
-    let text = output.trim() // 去掉 shell 输出首尾空白，减少摘要噪声。
+    let text = output.trim() 
     text = text.replace(/^exit code: 0\n?/, '') // 去掉成功退出码前缀，保留真正有用的输出。
-    const lines = text.split('\n').filter((l) => l.trim()) // 按行拆分并过滤空行。
+    const lines = text.split('\n').filter((l) => l.trim()) 
     if (lines.length === 0) return 'Done' // 没有有效输出时展示完成状态。
     if (lines.length <= 4) return lines.join('\n') // 输出较短时完整展示。
     return lines.slice(0, 3).join('\n') + `\n... +${lines.length - 3} lines` // 输出较长时展示前三行和剩余行数。
   }
 
   const lines = output
-    .trim() // 去掉未知工具输出的首尾空白。
-    .split('\n') // 按行拆分未知工具输出。
-    .filter((l) => l.trim()) // 过滤空行。
+    .trim() 
+    .split('\n')
+    .filter((l) => l.trim())
   if (lines.length === 0) return 'Done' // 没有有效输出时展示完成状态。
   if (lines.length <= 3) return lines.join('\n') // 输出较短时完整展示。
   return lines.slice(0, 2).join('\n') + `\n... +${lines.length - 2} lines` // 输出较长时展示前两行和剩余行数。

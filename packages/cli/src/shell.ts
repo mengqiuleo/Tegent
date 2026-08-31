@@ -1,9 +1,3 @@
-
-// 多个启动提示函数都需要知道用户当前使用的 Shell，才能生成正确的复制粘贴命令。
-// formatPersistCommand 用来集中维护原本散落在 printNoApiKeyMessage
-// 和 printNoWebSearchKeyHint 中重复出现的 switch(shell) 逻辑。
-
-// CLI 当前支持生成持久化命令的 Shell 类型集合。
 export type ShellType = 'powershell' | 'cmd' | 'bash' | 'zsh' | 'fish' | 'sh'
 
 /**
@@ -18,12 +12,10 @@ export type ShellType = 'powershell' | 'cmd' | 'bash' | 'zsh' | 'fish' | 'sh'
 export function detectShell(): ShellType {
   // Windows 平台没有通用的 SHELL 环境变量，因此需要单独判断。
   if (process.platform === 'win32') {
-    // PowerShell 通常会设置 PSModulePath，可作为轻量检测依据。
     if (process.env.PSModulePath) return 'powershell'
-    // Windows 上未检测到 PowerShell 时，默认按 CMD 生成命令。
     return 'cmd'
   }
-  // Unix-like 平台通常会通过 SHELL 暴露当前用户的登录 Shell 路径。
+
   const shellPath = process.env.SHELL ?? ''
   // 只取路径最后一段，例如 /bin/zsh 会得到 zsh。
   const base = shellPath.split('/').pop() ?? ''
