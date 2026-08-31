@@ -163,42 +163,24 @@ export interface AgentState {
   compressionLabel: string | null
 }
 
-/** 不依赖模型和权限模式的初始 UI 状态；`useAgent` 创建状态时再补上两者。 */
 const initialState: Omit<AgentState, 'modelId' | 'permissionMode'> = {
-  /** 初始没有 scrollback 消息。 */
   messages: [],
-  /** 初始没有 agentLoop 在跑。 */
   isLoading: false,
-  /** 初始没有活动工具。 */
   activeToolCalls: [],
-  /** 初始没有 shell 输出。 */
   shellOutput: '',
-  /** 初始没有权限请求。 */
   permissionQueue: [],
-  /** 初始没有问答弹窗。 */
   pendingQuestion: null,
-  /** 初始 token 用量全部归零。 */
   usage: {
-    /** 输入 token 累计。 */
     inputTokens: 0,
-    /** 输出 token 累计。 */
     outputTokens: 0,
-    /** 总 token 累计。 */
     totalTokens: 0,
-    /** 命中 provider prompt cache 的 token 数。 */
     cacheReadTokens: 0,
-    /** 写入 provider prompt cache 的 token 数。 */
     cacheCreationTokens: 0,
-    /** 当前上下文估算 token 数。 */
     currentContextTokens: 0,
   },
-  /** 初始没有错误。 */
   error: null,
-  /** 初始没有 todo。 */
   todos: [],
-  /** 初始不处于读取链。 */
   bufferingReads: false,
-  /** 初始不处于压缩流程。 */
   compressionLabel: null,
 }
 
@@ -207,24 +189,13 @@ const initialState: Omit<AgentState, 'modelId' | 'permissionMode'> = {
  *
  * @param initialModel 启动时选定的模型实例，后续 `/model` 可通过 `switchModel` 替换。
  * @param options CLI 启动和 slash command 汇总出来的 agent 配置，会在每次提交时传入 core。
- * @param initialSession 通过 `--continue` 或启动恢复加载出来的历史会话；没有恢复时为空。
  * @returns 给 App/ChatInput 使用的一组状态、提交函数、授权/问答 resolver、会话管理和显示辅助方法。
  */
-export function useAgent(initialModel: LanguageModel, options: AgentOptions, initialSession?: LoadedSession | null) {
-  // 如果启动时已经加载了会话（例如 --continue），先把 UI 状态填上历史消息和 token 用量。
-  // 这样用户还没输入新消息时，scrollback 和 /usage 就已经是恢复后的视图。
-  // loopStateRef 会在下面配套的 useEffect 中 hydrate，因为 ref 不能在 useState 初始化器之前设置。
+export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
   const [state, setState] = useState<AgentState>({
-    /** 先展开通用初始值，下面再覆盖需要从 options/session 派生的字段。 */
     ...initialState,
-    /** 当前 UI 显示的模型 id 来自启动配置。 */
     modelId: options.modelId,
-    /** 权限模式默认是 default，也可能由 --plan 等启动参数指定。 */
     permissionMode: options.permissionMode ?? 'default',
-    /** 有历史会话时把 core 消息转换成 UI 消息；否则从空消息开始。 */
-    messages: initialSession ? modelMessagesToDisplay(initialSession.messages) : initialState.messages,
-    /** 有历史会话时恢复 token 用量；否则使用归零值。 */
-    usage: initialSession ? { ...initialSession.tokenUsage } : initialState.usage,
   })
 
   /** 当前模型实例的 ref；避免每次切模型都重建大量回调，下一轮 submit 会读取最新值。 */
@@ -339,15 +310,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
   useEffect(() => {
     activeToolCallsLenRef.current = state.activeToolCalls.length
   }, [state.activeToolCalls.length])
-
-  // 首次渲染后，把预加载会话 hydrate 成 core 的 LoopState。
-  // 这样恢复会话后的第一条新消息会带着 existingState 进入 agentLoop，
-  // 继续写同一个会话，而不是新开一段。
-  useEffect(() => {
-    if (initialSession && !loopStateRef.current) {
-      loopStateRef.current = hydrateLoopState(initialSession, options.permissionMode ?? 'default')
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * 初始化记忆和持久化权限规则；每个 CLI 会话只执行一次。

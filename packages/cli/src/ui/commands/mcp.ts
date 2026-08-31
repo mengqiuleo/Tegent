@@ -247,7 +247,7 @@ export function createMcpCommandHandler(deps: McpCommandDeps) {
       text,
       [
         `Removed "${name}" from ${scope} scope (${result.path}).`,
-        'Current session unchanged — the running server (if any) keeps working until xc exits.',
+        'Current session unchanged — the running server (if any) keeps working until tegent exits.',
       ].join('\n'),
     )
   }

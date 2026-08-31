@@ -28,3 +28,28 @@ export function extractLastAssistantText(messages: ModelMessage[]): string {
   }
   return '' // 没有 assistant 消息时返回空字符串。
 }
+
+
+
+/**
+ * 把时间戳格式化成适合选择器阅读的相对时间。
+ *
+ * 输出类似 `5m ago`、`2h ago`、`3d ago`；超过天级展示范围后回退成日期。
+ * 会话选择器会把它放在每条预览旁边，相比 ISO 时间戳更适合快速扫出
+ * “我上周做的那条会话”。
+ *
+ * @param epochMs - 毫秒级时间戳。
+ * @returns 相对时间或日期字符串。
+ */
+export function formatRelativeTime(epochMs: number): string {
+  const diff = Date.now() - epochMs
+  const sec = Math.floor(diff / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hrs = Math.floor(min / 60)
+  if (hrs < 48) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  if (days < 14) return `${days}d ago`
+  return new Date(epochMs).toISOString().slice(0, 10)
+}
