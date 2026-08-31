@@ -123,6 +123,6 @@ export async function appendInputHistory(entry: InputHistoryEntry, cwd: string =
     await fs.mkdir(path.dirname(file), { recursive: true }) // 确保 `.tegent` 目录存在。
     await fs.appendFile(file, line, { encoding: 'utf-8' }) // 以追加方式写入一行历史。
   } catch {
-    // best-effort：历史写入失败不影响主流程。
+
   }
 }
