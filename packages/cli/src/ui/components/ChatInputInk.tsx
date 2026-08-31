@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Box, Text, useInput, useStdout } from 'ink'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import { Box, Static, Text, useInput } from 'ink'
 import { suggestRuleLabel } from '@tegent/core'
 import type { DisplayMessage, DisplayToolCall, TodoItem } from '@tegent/core'
 import type { ActiveToolCall } from '../hooks/use-agent.js'
@@ -10,8 +10,6 @@ import { inputReducer } from './chat-input/reducer.js'
 import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 import { fuzzyMatches, renderMessageLabel, toolPreview, toolStatusColor, truncate } from '../utils/toolkit.js'
 
-/** Ink 动态区最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
-const MAX_VISIBLE_MESSAGES = 30
 /** slash command 菜单最多展示的候选数量，超过后只显示前 N 项。 */
 const MAX_VISIBLE_MENU_ITEMS = 8
 /** PageUp/PageDown 每次让光标跨越的逻辑行数。 */
@@ -431,23 +429,16 @@ export function ChatInput({
   // initialCwdRef 固定启动时 cwd，历史文件始终写入同一个项目目录。
   const initialCwdRef = useRef(process.cwd())
 
-  // useStdout 提供终端尺寸；rows 用来估算可以显示多少条最近消息。
-  const { stdout } = useStdout()
-  const rows = stdout?.rows ?? 30
-
   /**
-   * 当前可见的最近消息。
+   * 把消息分成终端 scrollback 和动态区两部分。
    *
-   * 原版把历史写进真实 scrollback；Ink 版直接渲染一段尾部历史，避免巨量消息撑爆动态区域。
+   * Static 会把已经稳定的消息提交到真实终端 scrollback，因此历史不会因为
+   * 动态输入区重绘或消息数量增加而从渲染树中消失。流式 assistant 消息仍留在
+   * 动态区，保证文本增量可以实时更新；下一条消息到来后它会自动变成静态历史。
    */
-  const visibleMessages = useMemo(() => {
-    // 预留输入框、菜单、弹窗、spinner 等动态区域的高度。
-    const reservedRows = 14
-    // 根据终端行数动态收缩历史消息数量，但至少保留 5 条。
-    const maxMessages = Math.min(MAX_VISIBLE_MESSAGES, Math.max(5, rows - reservedRows))
-    // 只展示尾部消息，避免 Ink 动态区域过高。
-    return messages.slice(-maxMessages)
-  }, [messages, rows])
+  const lastMessage = messages[messages.length - 1]
+  const streamingMessage = lastMessage?.streamingChunk ? lastMessage : null
+  const staticMessages = streamingMessage ? [...messages.slice(0, -1)] : [...messages]
 
   /**
    * slash command 补全候选。
@@ -1021,15 +1012,15 @@ export function ChatInput({
 
   return (
     <Box flexDirection="column">
-      {/* 顶部历史区：只渲染最近一段消息，避免长会话撑满屏幕。 */}
-      <Box flexDirection="column">
-        {/* {visibleMessages.map((msg) => (
+      {/* 已完成历史写入真实终端 scrollback，支持像 Claude 一样向上查看完整会话。 */}
+      <Static items={staticMessages}>
+        {(msg) => (
           <MessageBlock key={msg.id} msg={msg} />
-        ))} */}
-        {messages.map((msg) => (
-          <MessageBlock key={msg.id} msg={msg} />
-        ))}
-      </Box>
+        )}
+      </Static>
+
+      {/* 当前流式 assistant 消息留在动态区，后续消息到来后再提交到 scrollback。 */}
+      {streamingMessage ? <MessageBlock key={streamingMessage.id} msg={streamingMessage} /> : null}
 
       {/* 模型维护的 todo 面板，只有存在 todo 时 Todos 才会实际渲染。 */}
       <Todos todos={todos} />
