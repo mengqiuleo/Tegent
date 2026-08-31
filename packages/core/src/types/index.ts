@@ -34,7 +34,6 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan'
 
 // ---- TodoWrite 工具的清单类型 ----
 
-// Todo 条目的状态：待处理、正在处理、已完成。
 export type TodoStatus = 'pending' | 'in_progress' | 'completed'
 
 // 模型内部工作清单的一项。只保存在 LoopState.todos 里，不落盘。
@@ -192,7 +191,6 @@ export interface AgentOptions {
 
   // 模型注册表，用于解析子代理自己的模型覆盖配置。
   // CLI 启动时注入；不传时子代理继承父级模型。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   modelRegistry?: { languageModel: (...args: any[]) => LanguageModel }
   // 子代理注册表。CLI 扫描内置与自定义 agent 定义后注入。
   // 不传时不会注册 task 工具，也就没有子代理能力。
@@ -282,13 +280,9 @@ export interface MemoryWriteNotice {
 
 // 一次会话结束/压缩后保存的摘要。
 export interface SessionSummary {
-  // 会话 ID。
   id: string
-  // 会话标题。
   title: string
-  // 开始时间，通常是 ISO 字符串。
   startedAt: string
-  // 结束时间，通常是 ISO 字符串。
   endedAt: string
   // 会话状态：已完成、进行中、已放弃。
   status: 'completed' | 'in_progress' | 'abandoned'
@@ -416,13 +410,6 @@ export const PROVIDER_KEY_URLS: Record<string, string> = {
   moonshotai: 'https://platform.moonshot.ai/console/api-keys',
 }
 
-// ---- 重新导出 AI SDK 类型 ----
-
-// 外部模块可以统一从 core 的 types 入口拿到这些 AI SDK 类型。
 export type { ModelMessage, LanguageModel }
-
-// ---- 重新导出子代理类型 ----
-
-// 子代理相关类型也从这里转发，减少外部依赖内部路径。
 export type { SubAgentEvent, SubAgentDefinition, SubAgentTrace } from '../agent/sub-agents/types.js'
 export type { SubAgentRegistry } from '../agent/sub-agents/registry.js'
