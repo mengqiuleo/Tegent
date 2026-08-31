@@ -388,7 +388,7 @@ async function main() {
   // 要恢复历史会话，进入 TUI 后用 /resume 选择。
   //  启动 Ink TUI，并拿到一个会在应用退出时完成的 Promise。
   const waitUntilExit = startApp(model, options)
-  //  等待 TUI 卸载；用户退出或 Ctrl+C 都会走到这里。
+  //  等待 TUI 卸载；/exit 或 Ctrl+C 都会走到这里。
   await waitUntilExit()
 
   //  正常退出路径（包括 Ctrl+C，它会先卸载 Ink）。

@@ -52,21 +52,21 @@ export interface TodoItem {
 
 // 每轮模型调用后的 token 用量汇总。
 export interface TokenUsage {
-  // 输入 token 数。AI SDK v6 会把缓存读取/写入 token 也归一到输入里。
+  /** 输入 token 数。AI SDK v6 会把缓存读取/写入 token 也归一到输入里。 */ 
   inputTokens: number
-  // 输出 token 数。
+  /** 输出 token 数。*/ 
   outputTokens: number
-  // 输入 + 输出的总 token 数。
+  /** 输入 + 输出的总 token 数。*/ 
   totalTokens: number
-  // 从 provider 侧缓存中读到的 prompt token 数。
-  // 这些 token 已包含在 inputTokens 中，这个字段只用于展示和账单解释。
+  /** 从 provider 侧缓存中读到的 prompt token 数。
+   这些 token 已包含在 inputTokens 中，这个字段只用于展示和账单解释。*/ 
   cacheReadTokens: number
-  // 写入 provider 侧缓存的 token 数。
-  // Anthropic 等 provider 会单独计费；不区分缓存写入的 provider 会是 0。
+  /**写入 provider 侧缓存的 token 数。
+    Anthropic 等 provider 会单独计费；不区分缓存写入的 provider 会是 0。*/ 
   cacheCreationTokens: number
-  // 最近一次 API 响应占用的上下文窗口大小。
-  // 注意这是“快照”，每轮覆盖，不是累计值；用于底部的 “N / M · X%” 指示。
-  // 这里用 input + output，是因为主流 provider 都把上下文窗口定义为两者共享的预算池。
+  /** 最近一次 API 响应占用的上下文窗口大小。
+  注意这是“快照”，每轮覆盖，不是累计值；用于底部的 “N / M · X%” 指示。
+   这里用 input + output，是因为主流 provider 都把上下文窗口定义为两者共享的预算池。*/ 
   currentContextTokens: number
 }
 

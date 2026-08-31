@@ -1081,7 +1081,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
   const { addInfoMessage, addUserMessage, echoCommand, addCommandMessage, addCommandResult } =
     useAgentDisplayHelpers(appendMessage)
 
-  // 对外暴露给 App.tsx/ChatInput.tsx 的完整控制面：state 用于渲染，函数用于驱动 core 或解析 UI 事件。
   return {
     state,
     submit,

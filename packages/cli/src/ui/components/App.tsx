@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-
 import { useApp } from 'ink'
 
 import {
@@ -26,7 +25,6 @@ import type {
   TokenUsage,
 } from '@tegent/core'
 
-import { VERSION } from '../../version.js'
 import { createDoctorCommandHandler } from '../commands/doctor.js'
 import { createMcpCommandHandler } from '../commands/mcp.js'
 import { createPluginCommandHandler } from '../commands/plugin.js'
@@ -36,7 +34,7 @@ import { parseBooleanArg } from '../utils.js'
 import { getHeaderRowCount } from './AppHeader.js'
 import { ChatInput } from './ChatInputInk.js'
 import { INIT_PROMPT, REVIEW_PROMPT, SLASH_COMMANDS } from './constants.js'
-import { formatRelativeTime } from '../utils/toolkit.js'
+import { buildHelpText, compactionHintForResume, formatRelativeTime, formatUsageReport } from '../utils/toolkit.js'
 
 interface AppProps {
   model: LanguageModel
@@ -53,117 +51,6 @@ interface AppProps {
 }
 
 
-/**
- * 把 TokenUsage 渲染成 `/usage` 使用的 markdown 文本块。
- *
- * cacheReadTokens 是 inputTokens 的子集，所以缓存命中率按
- * cacheReadTokens / inputTokens 计算；这正好对应用户关心的问题：
- * “我这次发出去的 prompt 里，有多少被缓存命中了？”
- *
- * @param usage - 要展示的 token 用量。
- * @param modelId - 该用量对应的模型 id。
- * @param source - 用量来源：当前会话、最近快照或历史会话。
- * @param sessionName - 可选的会话展示名。
- * @returns 格式化后的 markdown 用量报告。
- */
-function formatUsageReport(
-  usage: TokenUsage,
-  modelId: string,
-  source: 'live' | 'snapshot' | 'history',
-  sessionName?: string,
-): string {
-  const fmt = (n: number) => n.toLocaleString('en-US')
-  const hitRatio = usage.inputTokens > 0 ? `${((usage.cacheReadTokens / usage.inputTokens) * 100).toFixed(1)}%` : 'n/a'
-  const headerMap = {
-    live: '**Usage** (current session)',
-    snapshot: '**Usage** (last session — no turns yet)',
-    history: '**Usage** (history)',
-  }
-  const header = headerMap[source]
-  const lines = [header, '']
-  if (sessionName) lines.push(`- Session:         ${sessionName}`)
-  lines.push(
-    `- Model:           ${modelId}`,
-    `- Input tokens:    ${fmt(usage.inputTokens)}`,
-    `- Output tokens:   ${fmt(usage.outputTokens)}`,
-    `- Cache read:      ${fmt(usage.cacheReadTokens)}  (${hitRatio} of input)`,
-    `- Cache creation:  ${fmt(usage.cacheCreationTokens)}`,
-    `- Total:           ${fmt(usage.totalTokens)}`,
-    '',
-    'Cache numbers depend on the provider — DeepSeek/Moonshot/Qwen may report 0 even when prefix caching is active.',
-  )
-  return lines.join('\n')
-}
-
-/**
- * 为恢复的会话生成“上下文已使用 X%，建议 /compact”的提示。
- *
- * 如果恢复会话上一次记录的输入 token 数，或基于字符估算出的 token 数，
- * 已经超过模型上下文窗口的 60%，就返回提示文本；否则返回 null。
- * 优先使用 provider 上次真实返回的 `tokenUsage.inputTokens`，如果没有记录
- * 用量行（例如首轮尚未完成就被中断），再回退到字符估算值。
- *
- * 阈值刻意低于自动压缩触发线 80%，这样用户在下一轮可能触发自动压缩前，
- * 还有机会主动执行 `/compact`。
- *
- * @param tokens - 上次真实记录的 input tokens；没有记录时为 null。
- * @param estimatedTokens - 根据消息内容估算的 token 数。
- * @param modelId - 用于查询上下文窗口大小的模型 id。
- * @returns 超过阈值时返回提示文本，否则返回 null。
- */
-function compactionHintForResume(tokens: number | null, estimatedTokens: number, modelId: string): string | null {
-  const window = getContextWindow(modelId)
-  const used = Math.max(tokens ?? 0, estimatedTokens)
-  if (used === 0) return null
-  const pct = (used / window) * 100
-  if (pct < 60) return null
-  return `\n\n_Context is at **${pct.toFixed(0)}%** of the ${window.toLocaleString('en-US')}-token window — consider \`/compact\` before continuing, or it'll auto-compress on the next turn._`
-}
-
-
-// 原来的 formatUsageHistory 已经被组件内部的交互式 handleUsageHistory 选择器取代。
-// 详情见下方 handleUsageHistory()。
-
-/**
- * 生成 `/help` 输出文本。
- *
- * 会合并内置命令、skill 注册表贡献的命令，以及用户/项目/插件提供的 markdown 命令。
- *
- * @param skillCommands - 已加载 skill 暴露的命令。
- * @param fileCommands - 文件型 slash commands。
- * @returns 最终展示给用户的帮助文本。
- */
-function buildHelpText(
-  skillCommands: readonly { name: string; description: string }[],
-  fileCommands: readonly { name: string; description?: string }[],
-): string {
-  const allCommands = [
-    ...SLASH_COMMANDS,
-    ...skillCommands.map((s) => ({ name: `/${s.name}`, description: s.description })),
-    // 用户、项目、插件提供的 markdown 命令。
-    // 这些命令的 description 可选，因为没有 frontmatter 的命令文件也是合法的。
-    ...fileCommands.map((c) => ({ name: `/${c.name}`, description: c.description ?? '' })),
-  ]
-  return (
-    `TEGENT v${VERSION}\n\n` +
-    allCommands.map((c) => `  ${c.name.padEnd(16)} ${c.description}`).join('\n') +
-    `\n\nModel aliases: ${Object.keys(MODEL_ALIASES).join(', ')}` +
-    `\nKeyboard: Esc to interrupt the current turn · ${process.platform === 'darwin' ? '⌃C' : 'Ctrl+C'} (twice) to exit`
-  )
-}
-
-
-
-/**
- * 交互式 CLI 的根 React 组件。
- *
- * App 负责把 core 层的 agent 状态、slash command 处理器、会话恢复、
- * 主题设置、权限弹窗和最终 ChatInput 渲染连接起来。真正的终端绘制由
- * ChatInput 接管，App 更像是“状态和命令调度层”。
- *
- * @param props - App 启动所需的模型和 agent 选项。
- * @returns 渲染完整终端交互界面的 ChatInput。
- */
 export function App({
   model,
   options,
@@ -179,7 +66,7 @@ export function App({
     abort,
     cleanup, // 保存会话并退出
     clear,
-    compact, // 手动压缩上下文
+    compact,
     resume,
     rewind,
     getCheckpoints,
@@ -194,7 +81,7 @@ export function App({
     addCommandMessage, // 追加命令消息
     addCommandResult, // 追加命令结果
     askQuestion, // 弹出选择器问题
-    setPermissionMode, // 直接设置权限模式
+    setPermissionMode,
   } = useAgent(model, options)
 
   // 每次 `/skill refresh` 原地修改注册表时递增。
@@ -207,7 +94,6 @@ export function App({
   // 当 /skill refresh 推高版本号后重新计算，让 Tab 补全和 /help 无需重启即可看到新 skill。
   const skillCommands = useMemo(
     () => (options.skillRegistry ? options.skillRegistry.list() : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [skillRegistryVersion],
   )
 
@@ -215,7 +101,6 @@ export function App({
   // 它和 skills 共用同一个版本计数；/plugin refresh 重载两个注册表后也会触发刷新。
   const fileCommands = useMemo(
     () => (options.commandRegistry ? options.commandRegistry.list() : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [skillRegistryVersion],
   )
 
@@ -251,7 +136,6 @@ export function App({
   const ctrlCArmWindowMs = 2000
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // arm window 过期后自动清除 notice，避免退出提示长期停留。
   useEffect(() => {
     if (!notice) return
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
@@ -267,7 +151,6 @@ export function App({
   /**
    * 处理 Ctrl+C：双击退出，单击取消当前 turn 并展示退出提示。
    *
-   * 行为对齐 Claude Code：
    * 空闲 + 第一次按下：显示 “Press Ctrl+C again to exit”，开启 2 秒窗口。
    * 空闲 + 第二次按下：退出。
    * 加载中 + 第一次按下：中断当前 turn，显示提示，开启 2 秒窗口。
@@ -291,14 +174,11 @@ export function App({
     setNotice('Press Ctrl+C again to exit')
   }, [exit, abort, state.isLoading])
 
-  // 注册清理函数，供外层 SIGINT / graceful exit 调用。
   useEffect(() => {
     onCleanupReady?.(cleanup)
   }, [cleanup])
 
-  // 注册退出后的会话信息 getter。
-  // index.ts 会在 resetTerminal 之后调用它，向 shell 区域打印 `Resume: xc --resume <id>`。
-  // getSessionInfo 直接读取 loopStateRef，因此跨渲染保持稳定，挂载时注册一次即可。
+
   useEffect(() => {
     onSessionInfoReady?.(getSessionInfo)
   }, [getSessionInfo])
@@ -436,10 +316,6 @@ export function App({
     },
     [addInfoMessage, askQuestion, getCheckpoints, rewind],
   )
-
-  // 早期这里曾尝试通过 effect 执行 `cleanup().then(exit)`，
-  // 但 usePromptInput 持有的 raw stdin 引用会让事件循环在卸载后继续存活，
-  // 导致退出挂起，直到用户按键或调整终端大小。
 
   /**
    * 处理用户提交的输入，包括 slash command 和普通消息。

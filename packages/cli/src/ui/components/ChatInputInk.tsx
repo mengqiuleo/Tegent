@@ -1,27 +1,14 @@
-// 已实现功能：slash 补全、输入历史、权限弹窗、SelectOptions、Esc 中断、
-// Ctrl+C 中断、普通文本输入、普通粘贴、Enter 提交、Backspace 删除、
-// Delete 删除、左右移动光标、Home/End 跳转、上下移动光标、PageUp/PageDown 跳转。
-// 未实现功能：大段粘贴折叠成引用、Alt+Enter 换行、
-// Ctrl+Enter 换行、粘贴引用占位符删除。
-// 区别只在渲染策略：这里用 Ink 的 <Box>/<Text> 直接渲染，不再使用原版的
-// cell-level diff + process.stdout.write 精细绘制。
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-
 import { Box, Text, useInput, useStdout } from 'ink'
-
 import { suggestRuleLabel } from '@tegent/core'
 import type { DisplayMessage, DisplayToolCall, TodoItem } from '@tegent/core'
-
 import type { ActiveToolCall } from '../hooks/use-agent.js'
-// 本期使用 Ink useInput；后续如果要恢复 bracketed paste 和跨终端输入兼容，再接回 usePromptInput。
-// import { usePromptInput } from '../hooks/use-prompt-input.js'
 import { HISTORY_MAX, appendInputHistory, loadInputHistory } from '../input-history.js'
 import type { InputHistoryEntry } from '../input-history.js'
 import { formatTokenCount, getToolInputPreview, getToolLabel } from '../utils.js'
 import { inputReducer } from './chat-input/reducer.js'
 import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
-
-// export type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
+import { fuzzyMatches, renderMessageLabel, toolPreview, toolStatusColor, truncate } from '../utils/toolkit.js'
 
 /** Ink 动态区最多直接渲染的历史消息数量，避免长会话把输入框挤出屏幕。 */
 const MAX_VISIBLE_MESSAGES = 30
@@ -37,7 +24,6 @@ interface ChatInputProps {
   messages: readonly DisplayMessage[]
   /** 兼容原 ChatInput 的 prop；Ink 版不需要根据 header 行数做光标锚定。 */
   initialContentRows?: number
-  /** 普通提交入口；App 会在这里分流 slash command 或调用 useAgent.submit。 */
   onSubmit: (text: string) => void
   /** Ctrl+C 入口；App 负责双击退出和当前轮取消。 */
   onInterrupt: () => void
@@ -89,93 +75,6 @@ interface FreeformState {
   cursor: number
 }
 
-/**
- * 把字符串截断到大致可读的长度。
- *
- * Ink 版不做 cell 级宽度计算，这里只用字符数保护菜单和工具预览不要无限变宽。
- *
- * @param s 原始文本。
- * @param max 最大字符数。
- * @returns 可能带省略号的文本。
- */
-function truncate(s: string, max: number): string {
-  // 没超过上限时直接返回原字符串，避免无意义分配。
-  if (s.length <= max) return s
-  // 超过上限时预留 1 个字符放省略号，让最终长度大致不超过 max。
-  return s.slice(0, Math.max(0, max - 1)) + '…'
-}
-
-/**
- * 生成工具调用的单行入参预览。
- *
- * @param toolName 工具名。
- * @param input 工具入参。
- * @param max 最大字符数。
- * @returns 可直接显示在工具标题后的预览文本。
- */
-function toolPreview(toolName: string, input: Record<string, unknown>, max = 90): string {
-  // getToolInputPreview 会按工具类型挑选最有用的字段，例如 shell command 或 file path。
-  const preview = getToolInputPreview(toolName, input)
-  // 有预览就截断到 UI 可接受长度；没有可读字段时返回空字符串。
-  return preview ? truncate(preview, max) : ''
-}
-
-/**
- * 根据工具结果状态选择 Ink 颜色。
- *
- * @param status 工具状态。
- * @returns Ink Text 可接受的颜色名。
- */
-function toolStatusColor(status: DisplayToolCall['status']): 'green' | 'yellow' | 'red' | 'gray' {
-  // 成功完成用绿色，表示这条工具结果已经落定。
-  if (status === 'completed') return 'green'
-  // 工具报错或被用户拒绝都属于需要注意的失败状态，用红色。
-  if (status === 'error' || status === 'denied') return 'red'
-  // running 只会出现在运行区或未完成工具展示中，用黄色表示进行中。
-  if (status === 'running') return 'yellow'
-  // 其它 pending/未知状态用灰色，降低视觉权重。
-  return 'gray'
-}
-
-/**
- * 判断 slash command 是否 fuzzy 命中。
- *
- * 逻辑和原 ChatInput 一致：query 是 target 的子序列即可，比如 `mc` 能命中 `mcp`。
- *
- * @param target 候选命令名。
- * @param query 用户输入的查询。
- * @returns 是否命中。
- */
-function fuzzyMatches(target: string, query: string): boolean {
-  // qi 指向 query 当前等待匹配的字符。
-  let qi = 0
-  // ti 从左到右扫描 target；只要顺序能对上，就认为 fuzzy 命中。
-  for (let ti = 0; ti < target.length && qi < query.length; ti++) {
-    // 当前 target 字符命中 query 当前字符时，推进 query 指针。
-    if (target[ti] === query[qi]) qi++
-  }
-  // query 每个字符都被按顺序匹配到，才算命中。
-  return qi === query.length
-}
-
-/**
- * 根据消息类型生成左侧短标签。
- *
- * @param msg 要渲染的 display message。
- * @returns 适合在 TUI 中显示的标签。
- */
-function renderMessageLabel(msg: DisplayMessage): string {
-  // slash command 回显用短 `$` 标签，和普通用户消息区分开。
-  if (msg.kind === 'command-echo') return '$'
-  // slash command 结果和系统提示类消息用 info。
-  if (msg.kind === 'command-result') return 'info'
-  // 用户输入显示为 you。
-  if (msg.role === 'user') return 'you'
-  // tool 角色理论上很少直接进入此 Ink 展示路径，保留标签兜底。
-  if (msg.role === 'tool') return 'tool'
-  // 其它默认按 assistant 输出处理。
-  return 'assistant'
-}
 
 /**
  * 渲染一条 scrollback 消息。
@@ -313,8 +212,8 @@ function Todos({ todos }: { todos: readonly TodoItem[] }) {
 function PermissionDialog({ permission, selected }: { permission: PermissionRequest; selected: number }) {
   // MCP 工具展示 server/rawName；内置工具展示格式化后的工具名。
   const title = permission.mcp
-    ? `X-Code wants to use MCP tool: ${permission.mcp.serverName}/${permission.mcp.rawName}`
-    : `X-Code wants to use ${getToolLabel(permission.toolName)}`
+    ? `TEGENT wants to use MCP tool: ${permission.mcp.serverName}/${permission.mcp.rawName}`
+    : `TEGENT wants to use ${getToolLabel(permission.toolName)}`
   // 权限弹窗中展示一段短参数预览，帮助用户判断是否授权。
   const preview = toolPreview(permission.toolName, permission.input, 120)
   // suggestRuleLabel 不为 null 表示可以生成 always-allow 规则。
@@ -477,17 +376,6 @@ function Footer({
   )
 }
 
-/**
- * Ink 直渲染版 ChatInput。
- *
- * 数据流：
- * - App 把 useAgent.state 传进来，本组件负责渲染。
- * - 用户输入先存在本组件本地 reducer/ref 中。
- * - Enter 后调用 onSubmit，把文本交回 App，再由 App 调 useAgent.submit 或处理 slash command。
- *
- * @param props ChatInput 渲染和交互所需的全部状态/回调。
- * @returns Ink 组件树。
- */
 export function ChatInput({
   messages,
   onSubmit,
@@ -1135,7 +1023,10 @@ export function ChatInput({
     <Box flexDirection="column">
       {/* 顶部历史区：只渲染最近一段消息，避免长会话撑满屏幕。 */}
       <Box flexDirection="column">
-        {visibleMessages.map((msg) => (
+        {/* {visibleMessages.map((msg) => (
+          <MessageBlock key={msg.id} msg={msg} />
+        ))} */}
+        {messages.map((msg) => (
           <MessageBlock key={msg.id} msg={msg} />
         ))}
       </Box>

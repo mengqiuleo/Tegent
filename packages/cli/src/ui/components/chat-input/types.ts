@@ -1,5 +1,3 @@
-// ChatInput 的公开和内部数据类型。
-
 /** slash 补全菜单中的一行。顶层命令行和子命令行都用这个结构渲染：
  *  展示列使用 `name`/`description`，但接受补全时使用 `applyText`，
  *  这样子命令行（`{ name: 'list', applyText: '/mcp list' }`）能正确替换整个输入。 */
