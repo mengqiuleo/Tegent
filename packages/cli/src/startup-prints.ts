@@ -1,28 +1,11 @@
-// 这里包含无 API key、无 WebSearch key、会话恢复提示和版本更新检查。
-// 这些展示性文案从 index.ts 中拆出来，让主入口更专注于启动编排。
 import { Chalk } from 'chalk'
-
-// 引入 Chalk，用来按终端能力给提示文本上色。
-
 import fs from 'node:fs'
-// 引入 Node 文件系统模块，用于读取和写入更新检查缓存。
 import path from 'node:path'
-
-// 引入 Node 路径模块，用于拼接跨平台缓存文件路径。
-
 import { PROVIDER_DETECTION_ORDER, PROVIDER_KEY_URLS, USER_TEGENT_DIR } from '@tegent/core'
-
-// 引入核心包中的 provider 顺序、key 获取地址和用户目录。
-
 import { getSessionExitInfo } from './app.js'
-// 引入会话退出信息读取函数，用于生成 resume 命令。
 import { detectShell, formatPersistCommand } from './shell.js'
-// 引入 shell 检测和持久化环境变量命令格式化工具。
 import type { ShellType } from './shell.js'
-// 引入 shell 类型，只在类型检查阶段使用。
 import { VERSION } from './version.js'
-
-// 引入当前 CLI 版本号，用于和 npm 最新版本比较。
 
 const chalk = new Chalk({ level: process.stderr.isTTY ? 3 : 0 }) // 根据 stderr 是否是 TTY 决定是否启用彩色输出。
 
@@ -48,11 +31,11 @@ export function printNoApiKeyMessage(): void {
       .toLowerCase() // 转成小写，匹配 PROVIDER_KEY_URLS 的键名格式。
     const url = PROVIDER_KEY_URLS[provider] ?? '' // 获取 provider key 申请地址；缺失时用空字符串避免输出 undefined。
     console.error(`  ${envName(envKey.padEnd(32))} ${chalk.dim(url)}`) // 输出对齐后的环境变量名和对应申请地址。
-  } // 结束 provider key 列表遍历。
+  }
   console.error(
     // 输出 OpenAI-compatible 自定义端点的额外配置提示。
     `\n  ${envName('OPENAI_COMPATIBLE_API_KEY'.padEnd(32))} ${chalk.dim('(custom OpenAI-compatible endpoint)')}`, // 展示自定义兼容端点的 key 名称和说明。
-  ) // 结束自定义端点提示输出。
+  )
 
   const shell = detectShell() // 检测当前用户使用的 shell，以便生成正确的持久化命令。
   const restartHint: Record<ShellType, string> = {
@@ -68,9 +51,9 @@ export function printNoApiKeyMessage(): void {
   console.error('Persist it so you do not need to set it every session:\n') // 说明下面的命令用于持久保存环境变量。
   console.error(`  ${code(formatPersistCommand('ANTHROPIC_API_KEY', 'sk-ant-...', shell))}`) // 输出一个以 Anthropic key 为例的持久化命令。
   const hint = restartHint[shell] // 取出当前 shell 对应的重启提示，可能为空字符串。
-  if (hint) console.error(`  ${comment(hint)}  ${code('xc')}`) // 如果需要重启提示，就输出重启后运行 xc 的建议。
+  if (hint) console.error(`  ${comment(hint)}  ${code('tegent')}`) // 如果需要重启提示，就输出重启后运行 tegent 的建议。
   console.error(`\nAlternatively, put keys in a project-local ${chalk.bold('.env')} file (loaded from cwd upward).`) // 提示也可以把 key 放在项目本地 .env 中。
-} // 结束无 API key 提示函数。
+} 
 
 /**
  * 打印缺少 WebSearch API key 时的非阻塞提示。
@@ -79,11 +62,11 @@ export function printNoApiKeyMessage(): void {
  * 不阻止 CLI 继续启动。
  */
 export function printNoWebSearchKeyHint(): void {
-  const shell = detectShell() // 检测当前 shell，用于生成对应的环境变量持久化命令。
-  const yellow = chalk.yellow // 缓存黄色样式函数，用于突出 Note 标签。
-  const bold = chalk.bold // 缓存加粗样式函数，用于突出环境变量名。
-  const dim = chalk.gray // 缓存灰色样式函数，用于弱化补充说明。
-  const code = chalk.cyan // 缓存青色样式函数，用于展示可复制命令。
+  const shell = detectShell()
+  const yellow = chalk.yellow 
+  const bold = chalk.bold
+  const dim = chalk.gray 
+  const code = chalk.cyan 
 
   console.error(yellow('Note:') + ' WebSearch is disabled — no search API key configured.') // 输出 WebSearch 不可用的说明。
   console.error(dim('  (WebFetch still works key-less; the hint is only for web search.)')) // 说明 WebFetch 不受该 key 缺失影响。
@@ -93,7 +76,7 @@ export function printNoWebSearchKeyHint(): void {
 
   const cmd = formatPersistCommand('TAVILY_API_KEY', 'tvly-...', shell) // 生成一个以 Tavily 为例的持久化环境变量命令。
   console.error(`  ${dim(`(${shell})`)}  ${code(cmd)}\n`) // 输出当前 shell 名称和可复制的配置命令。
-} // 结束无 WebSearch key 提示函数。
+}
 
 /**
  * 在 Ink 已卸载且终端已经复位之后，打印一条会话恢复提示。
@@ -109,10 +92,10 @@ export function printResumeHint(): void {
   const info = getSessionExitInfo() // 读取当前会话的退出信息；没有有效会话时返回空值。
   if (!info) return // 如果没有会话信息，直接跳过恢复提示。
   const key = info.taskSlug ? `${info.taskSlug}-${info.sessionId}` : info.sessionId // 优先拼接 slug 和 sessionId，否则只使用 sessionId。
-  const cmd = chalk.cyan('/resume') // 把恢复命令着成青色，方便用户复制识别。
-  const dim = chalk.gray // 缓存灰色样式函数，用于弱化提示前缀。
+  const cmd = chalk.cyan('/resume') 
+  const dim = chalk.gray
   process.stdout.write(`${dim('Resume this session:')} start tegent and run ${cmd} (session: ${key})\n`) // 写到 stdout，输出最终的恢复提示。
-} // 结束会话恢复提示函数。
+} 
 
 // ── 启动阶段更新检查 ──────────────────────────────────────────────────
 
@@ -128,15 +111,14 @@ const NPM_REGISTRY_URL = 'https://registry.npmjs.org/@tegent/cli/latest' // 定�
  * @returns 大于 0 表示 a 较新，小于 0 表示 b 较新，等于 0 表示相同。
  */
 function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number) // 把版本 a 按点拆分并转成数字数组。
-  const pb = b.split('.').map(Number) // 把版本 b 按点拆分并转成数字数组。
+  const pa = a.split('.').map(Number) 
+  const pb = b.split('.').map(Number) 
   for (let i = 0; i < 3; i++) {
-    // 只比较 major、minor、patch 三段。
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0) // 计算当前版本段差值，缺失段按 0 处理。
-    if (diff !== 0) return diff // 一旦某段不同，直接返回差值作为比较结果。
-  } // 结束三段版本号遍历。
-  return 0 // 三段都相同则认为版本相等。
-} // 结束版本比较函数。
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0) 
+    if (diff !== 0) return diff
+  } 
+  return 0 
+}
 
 /**
  * 执行启动后即发即忘的版本更新检查。
@@ -159,14 +141,13 @@ export async function checkForUpdate(): Promise<void> {
       // 如果距离上次检查不到一天，就认为缓存仍然有效。
       if (compareVersions(cache.latest, current) > 0) {
         // 如果缓存中的最新版本大于当前版本，说明有更新可用。
-        printUpdateHint(current, cache.latest) // 打印更新提示。
-      } // 结束新版判断。
+        printUpdateHint(current, cache.latest) 
+      } 
       return // 缓存已经给出结果，无需继续访问 npm。
-    } // 结束缓存有效期判断。
+    } 
   } catch {
-    // 缓存不存在、损坏或读取失败时进入这里。
-    // 缓存缺失或损坏时继续走网络检查，不把缓存问题暴露给用户。
-  } // 结束缓存读取兜底逻辑。
+
+  }
 
   // 从 npm 获取最新版本号。
   const controller = new AbortController() // 创建 AbortController，用于给 fetch 设置超时中止。
@@ -190,26 +171,20 @@ export async function checkForUpdate(): Promise<void> {
     if (compareVersions(latest, current) > 0) {
       // 比较 npm 最新版本和当前版本，判断是否需要提示更新。
       printUpdateHint(current, latest) // 如果存在新版，打印更新提示。
-    } // 结束新版提示判断。
+    }
   } finally {
     // 无论请求成功、失败还是提前返回，都执行清理。
     clearTimeout(timeout) // 清理超时定时器，避免留下不必要的事件句柄。
-  } // 结束网络更新检查逻辑。
-} // 结束更新检查函数。
+  }
+}
 
-/**
- * 打印发现新版本时的一行更新提示。
- *
- * @param current - 当前运行的 CLI 版本。
- * @param latest - npm registry 返回的最新 CLI 版本。
- */
+
 function printUpdateHint(current: string, latest: string): void {
   console.error(
-    // 向 stderr 输出一行彩色更新提示。
-    chalk.yellow('Update available:') + // 输出黄色的更新可用标签。
-      ` ${chalk.gray(current)} → ${chalk.green(latest)}` + // 输出当前版本和最新版本，用箭头连接。
-      chalk.gray('  Run ') + // 输出灰色的命令引导文字。
-      chalk.cyan('pnpm add -g @tegent/cli') + // 输出青色的全局安装更新命令。
-      chalk.gray(' to update.'), // 输出灰色的收尾说明。
-  ) // 结束更新提示输出。
-} // 结束更新提示函数。
+    chalk.yellow('Update available:') + 
+      ` ${chalk.gray(current)} → ${chalk.green(latest)}` + 
+      chalk.gray('  Run ') + 
+      chalk.cyan('pnpm add -g @tegent/cli') + 
+      chalk.gray(' to update.'),
+  )
+} 

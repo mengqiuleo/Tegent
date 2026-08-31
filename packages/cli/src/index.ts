@@ -73,9 +73,11 @@ function resetTerminal(): void {
     //  同步显示光标。
     fs.writeSync(1, '\x1b[?25h')
     // 显示光标
-    //  同步退出备用屏幕，回到普通终端屏幕。
-    fs.writeSync(1, '\x1b[?1049l')
-    // 退出备用屏幕（如果曾经进入过）
+    //  注意：这里绝不能写 \x1b[?1049l（退出备用屏幕）。
+    // 我们从未进入过备用屏幕（Ink 的 alternateScreen 选项没有开启；真开启时 Ink
+    // 的卸载流程也会自己退出），但 xterm.js（VSCode 终端）在未进入备用屏幕的情况下
+    // 收到 1049l 仍会执行 restoreCursor——把光标瞬移回从未保存过的 (1,1)，
+    // 曾导致退出后 shell 提示符覆盖在会话内容中间。
     //  同步输出回车换行，让后续 shell 提示符另起一行。
     fs.writeSync(1, '\r\n')
     // 让 shell 提示符落在一个全新的行上
@@ -388,7 +390,7 @@ async function main() {
   // 要恢复历史会话，进入 TUI 后用 /resume 选择。
   //  启动 Ink TUI，并拿到一个会在应用退出时完成的 Promise。
   const waitUntilExit = startApp(model, options)
-  //  等待 TUI 卸载；用户退出或 Ctrl+C 都会走到这里。
+  //  等待 TUI 卸载；/exit 或 Ctrl+C 都会走到这里。
   await waitUntilExit()
 
   //  正常退出路径（包括 Ctrl+C，它会先卸载 Ink）。

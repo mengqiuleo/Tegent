@@ -17,7 +17,7 @@
 // POSIX 保证小于等于 PIPE_BUF 的 append 写入是原子的，PIPE_BUF 通常是 4096 字节。
 // Windows 的 append-mode handle（`O_APPEND` 到 `FILE_APPEND_DATA`）也会按单次写调用原子追加。
 // 一条输入历史通常远小于这个预算。
-// 因此这里刻意不加 lockfile：项目本地文件、少见的并发 xc 进程、单次 append 原子性，
+// 因此这里刻意不加 lockfile：项目本地文件、少见的并发 tegent 进程、单次 append 原子性，
 // 这些条件加起来已经足够，lockfile 的复杂度大于收益。
 import fs from 'node:fs/promises' // 导入 promise 版 fs，用于异步读写历史文件。
 import path from 'node:path' // 导入路径工具，用于拼接项目内历史文件路径。
@@ -123,6 +123,6 @@ export async function appendInputHistory(entry: InputHistoryEntry, cwd: string =
     await fs.mkdir(path.dirname(file), { recursive: true }) // 确保 `.tegent` 目录存在。
     await fs.appendFile(file, line, { encoding: 'utf-8' }) // 以追加方式写入一行历史。
   } catch {
-    // best-effort：历史写入失败不影响主流程。
+
   }
 }

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-
 import { useApp } from 'ink'
 
 import {
@@ -22,12 +21,10 @@ import type {
   AgentOptions,
   KnowledgeFact,
   LanguageModel,
-  LoadedSession,
   SkillDefinition,
   TokenUsage,
 } from '@tegent/core'
 
-import { VERSION } from '../../version.js'
 import { createDoctorCommandHandler } from '../commands/doctor.js'
 import { createMcpCommandHandler } from '../commands/mcp.js'
 import { createPluginCommandHandler } from '../commands/plugin.js'
@@ -35,340 +32,28 @@ import { createSkillCommandHandler } from '../commands/skill.js'
 import { useAgent } from '../hooks/use-agent.js'
 import { parseBooleanArg } from '../utils.js'
 import { getHeaderRowCount } from './AppHeader.js'
-// import { ChatInput } from './ChatInput.js'
 import { ChatInput } from './ChatInputInk.js'
+import { INIT_PROMPT, REVIEW_PROMPT, SLASH_COMMANDS } from './constants.js'
+import { buildHelpText, compactionHintForResume, formatRelativeTime, formatUsageReport } from '../utils/toolkit.js'
 
 interface AppProps {
   model: LanguageModel
   options: AgentOptions
-  /**
-   * `xc --continue` 预先加载好的会话。
-   *
-   * 首次渲染时会用它恢复 agent 状态，这样用户还没发送新消息前，
-   * 历史消息就已经出现在滚动区里。全新启动时为 null。
-   */
-  initialSession?: LoadedSession | null
-  /**
-   * 是否在挂载后立即打开恢复会话选择器。
-   *
-   * 值为 `pick` 时，对应 `xc --resume` 不带 id 的启动路径。等 Ink 准备好后，
-   * 这里会复用和 `/resume` 相同的选择器逻辑。
-   */
-  resumeIntent?: 'pick' | null
   onCleanupReady?: (fn: () => Promise<void>) => void
   /**
    * 向 Ink 卸载后的恢复提示提供一份实时会话快照。
    *
    * app.tsx 会注册这个 getter；index.ts 的 gracefulShutdown 在终端复位后调用它，
-   * 从而把 `xc --resume <id>` 提示打印在 shell prompt 区域，方便用户复制。
+   * 在 shell prompt 区域打印 “Resume this session: start tegent and run /resume”，
+   * 方便用户下次进入 TUI 后用 /resume 在选择器里认出这次会话。
    */
   onSessionInfoReady?: (getter: () => { sessionId: string; taskSlug: string; messageCount: number } | null) => void
 }
 
-/**
- * 内置 slash command 列表。
- *
- * 这份静态列表用于 `/help` 文本和 Tab 补全；skill 注册表里的命令会在运行时
- * 动态追加，不写死在这里。
- */
-export const SLASH_COMMANDS = [
-  { name: '/help', description: 'Show this help message' },
-  {
-    name: '/model',
-    description: 'Pick a model (no-arg = interactive) — choice is saved',
-    argumentHint: '[model-id]',
-  },
-  {
-    name: '/thinking',
-    description: 'Toggle extended thinking on/off (no-arg = show status) — saved',
-    argumentHint: '[on|off]',
-  },
-  {
-    name: '/plan',
-    description: 'Toggle plan mode on/off (no-arg = show status) — saved',
-    argumentHint: '[on|off]',
-  },
-  { name: '/clear', description: 'Clear conversation history' },
-  { name: '/compact', description: 'Manually compress context' },
-  { name: '/resume', description: 'Pick a past session in this project to resume', argumentHint: '[id]' },
-  {
-    name: '/rewind',
-    description: 'Roll back files + conversation to a previous user message (no-arg = picker)',
-    argumentHint: '[checkpoint-id]',
-  },
-  { name: '/init', description: 'Initialize project knowledge' },
-  { name: '/review', description: 'Review a pull request (no-arg = list open PRs)', argumentHint: '[PR]' },
-  { name: '/usage', description: 'Show current-session token usage (input/output/cache)' },
-  { name: '/usage-history', description: 'List past sessions in this project' },
-  { name: '/memory', description: 'Show auto-memory entries (project + user)' },
-  {
-    name: '/mcp',
-    description: 'Manage MCP servers',
-    // 在输入 `/mcp ` 或 `/mcp <prefix>` 时显示子命令菜单。
-    // 顺序和 handleMcp 内部 switch 保持一致，确保菜单覆盖所有分支。
-    subcommands: [
-      { name: 'list', description: 'List configured MCP servers' },
-      { name: 'tools', description: 'List tools from connected servers (optionally filter by server)' },
-      { name: 'add', description: 'Add a new MCP server (stdio or http) to user / project config' },
-      { name: 'add-json', description: 'Add an MCP server from a raw JSON config object' },
-      { name: 'remove', description: 'Remove an MCP server from config' },
-      { name: 'refresh', description: 'Reload mcpServers from disk and reconnect' },
-    ],
-  },
-  {
-    name: '/skill',
-    description: 'Manage skills',
-    subcommands: [
-      { name: 'install', description: 'Fetch and install a skill from a URL' },
-      { name: 'list', description: 'List installed skills (with on/off state)' },
-      { name: 'refresh', description: 'Re-scan skills dirs and apply changes without restart' },
-      { name: 'disable', description: 'Disable a skill (kept on disk; run /skill refresh to apply now)' },
-      { name: 'enable', description: 'Re-enable a previously disabled skill' },
-      { name: 'uninstall', description: 'Delete a skill directory from disk' },
-    ],
-  },
-  {
-    name: '/plugin',
-    description: 'Manage plugins (bundled skills / agents / mcp / hooks)',
-    // 子命令顺序镜像 handlePlugin 的 switch。
-    // `marketplace` 本身是一个二级命令组，下面还有 add/remove/list/refresh/info。
-    subcommands: [
-      { name: 'list', description: 'List installed plugins (with enable state + source)' },
-      { name: 'info', description: "Show a plugin's manifest, contributions, and hooks" },
-      {
-        name: 'install',
-        description: 'Install a plugin from <name@marketplace>, git, github:owner/repo, or local path',
-      },
-      { name: 'uninstall', description: 'Remove a plugin (cache + settings entry; data dir preserved)' },
-      {
-        name: 'enable',
-        description: 'Enable a plugin (writes settings — restart for full effect; --scope=user|project)',
-      },
-      { name: 'disable', description: 'Disable a plugin without uninstalling (--scope=user|project)' },
-      { name: 'search', description: 'Search subscribed marketplaces by keyword' },
-      { name: 'update', description: 'Reinstall a plugin from its recorded source' },
-      { name: 'refresh', description: 'Live-reload plugins + skills/agents/commands/hooks/MCP servers' },
-      { name: 'doctor', description: 'Show plugin load errors and integration warnings' },
-      { name: 'marketplace', description: 'Manage marketplace subscriptions (add | remove | list | refresh | info)' },
-    ],
-  },
-  { name: '/doctor', description: 'Diagnose environment, API keys, MCP servers, plugins, and agents' },
-  { name: '/exit', description: 'Exit (flushes session)' },
-] as const
 
-/**
- * 把 TokenUsage 渲染成 `/usage` 使用的 markdown 文本块。
- *
- * cacheReadTokens 是 inputTokens 的子集，所以缓存命中率按
- * cacheReadTokens / inputTokens 计算；这正好对应用户关心的问题：
- * “我这次发出去的 prompt 里，有多少被缓存命中了？”
- *
- * @param usage - 要展示的 token 用量。
- * @param modelId - 该用量对应的模型 id。
- * @param source - 用量来源：当前会话、最近快照或历史会话。
- * @param sessionName - 可选的会话展示名。
- * @returns 格式化后的 markdown 用量报告。
- */
-function formatUsageReport(
-  usage: TokenUsage,
-  modelId: string,
-  source: 'live' | 'snapshot' | 'history',
-  sessionName?: string,
-): string {
-  const fmt = (n: number) => n.toLocaleString('en-US')
-  const hitRatio = usage.inputTokens > 0 ? `${((usage.cacheReadTokens / usage.inputTokens) * 100).toFixed(1)}%` : 'n/a'
-  const headerMap = {
-    live: '**Usage** (current session)',
-    snapshot: '**Usage** (last session — no turns yet)',
-    history: '**Usage** (history)',
-  }
-  const header = headerMap[source]
-  const lines = [header, '']
-  if (sessionName) lines.push(`- Session:         ${sessionName}`)
-  lines.push(
-    `- Model:           ${modelId}`,
-    `- Input tokens:    ${fmt(usage.inputTokens)}`,
-    `- Output tokens:   ${fmt(usage.outputTokens)}`,
-    `- Cache read:      ${fmt(usage.cacheReadTokens)}  (${hitRatio} of input)`,
-    `- Cache creation:  ${fmt(usage.cacheCreationTokens)}`,
-    `- Total:           ${fmt(usage.totalTokens)}`,
-    '',
-    'Cache numbers depend on the provider — DeepSeek/Moonshot/Qwen may report 0 even when prefix caching is active.',
-  )
-  return lines.join('\n')
-}
-
-/**
- * 为恢复的会话生成“上下文已使用 X%，建议 /compact”的提示。
- *
- * 如果恢复会话上一次记录的输入 token 数，或基于字符估算出的 token 数，
- * 已经超过模型上下文窗口的 60%，就返回提示文本；否则返回 null。
- * 优先使用 provider 上次真实返回的 `tokenUsage.inputTokens`，如果没有记录
- * 用量行（例如首轮尚未完成就被中断），再回退到字符估算值。
- *
- * 阈值刻意低于自动压缩触发线 80%，这样用户在下一轮可能触发自动压缩前，
- * 还有机会主动执行 `/compact`。
- *
- * @param tokens - 上次真实记录的 input tokens；没有记录时为 null。
- * @param estimatedTokens - 根据消息内容估算的 token 数。
- * @param modelId - 用于查询上下文窗口大小的模型 id。
- * @returns 超过阈值时返回提示文本，否则返回 null。
- */
-function compactionHintForResume(tokens: number | null, estimatedTokens: number, modelId: string): string | null {
-  const window = getContextWindow(modelId)
-  const used = Math.max(tokens ?? 0, estimatedTokens)
-  if (used === 0) return null
-  const pct = (used / window) * 100
-  if (pct < 60) return null
-  return `\n\n_Context is at **${pct.toFixed(0)}%** of the ${window.toLocaleString('en-US')}-token window — consider \`/compact\` before continuing, or it'll auto-compress on the next turn._`
-}
-
-/**
- * 把时间戳格式化成适合选择器阅读的相对时间。
- *
- * 输出类似 `5m ago`、`2h ago`、`3d ago`；超过天级展示范围后回退成日期。
- * 会话选择器会把它放在每条预览旁边，相比 ISO 时间戳更适合快速扫出
- * “我上周做的那条会话”。
- *
- * @param epochMs - 毫秒级时间戳。
- * @returns 相对时间或日期字符串。
- */
-function formatRelativeTime(epochMs: number): string {
-  const diff = Date.now() - epochMs
-  const sec = Math.floor(diff / 1000)
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hrs = Math.floor(min / 60)
-  if (hrs < 48) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  if (days < 14) return `${days}d ago`
-  return new Date(epochMs).toISOString().slice(0, 10)
-}
-
-// 原来的 formatUsageHistory 已经被组件内部的交互式 handleUsageHistory 选择器取代。
-// 详情见下方 handleUsageHistory()。
-
-/**
- * 生成 `/help` 输出文本。
- *
- * 会合并内置命令、skill 注册表贡献的命令，以及用户/项目/插件提供的 markdown 命令。
- *
- * @param skillCommands - 已加载 skill 暴露的命令。
- * @param fileCommands - 文件型 slash commands。
- * @returns 最终展示给用户的帮助文本。
- */
-function buildHelpText(
-  skillCommands: readonly { name: string; description: string }[],
-  fileCommands: readonly { name: string; description?: string }[],
-): string {
-  const allCommands = [
-    ...SLASH_COMMANDS,
-    ...skillCommands.map((s) => ({ name: `/${s.name}`, description: s.description })),
-    // 用户、项目、插件提供的 markdown 命令。
-    // 这些命令的 description 可选，因为没有 frontmatter 的命令文件也是合法的。
-    ...fileCommands.map((c) => ({ name: `/${c.name}`, description: c.description ?? '' })),
-  ]
-  return (
-    `TEGENT v${VERSION}\n\n` +
-    allCommands.map((c) => `  ${c.name.padEnd(16)} ${c.description}`).join('\n') +
-    `\n\nModel aliases: ${Object.keys(MODEL_ALIASES).join(', ')}` +
-    `\nKeyboard: Esc to interrupt the current turn · ${process.platform === 'darwin' ? '⌃C' : 'Ctrl+C'} (twice) to exit`
-  )
-}
-
-/**
- * `/init` 的 prompt 正文。
- *
- * 它会作为用户消息提交给 agent，让 agent 用完整工具链（Read/Glob/Grep/Edit/Write）
- * 检查代码库，再基于真实证据编写 AGENTS.md，而不是套静态模板。
- *
- * 相比 Claude Code 旧版 OLD_INIT，这里有几个设计取舍：
- * - 目标文件是 AGENTS.md，这是本项目约定，而不是 CLAUDE.md。
- * - 明确提到 AGENTS.local.md 是个人层，避免模型把用户个人偏好
- *   （沙箱 URL、角色、语气等）写进团队共享文件。
- * - 携带 NEW_INIT 的极简规则：如果删掉某一行不会让 agent 犯错，就删。
- *   这能显著避免 AGENTS.md 膨胀，因为该文件每轮都会被读取。
- * - 要求模型用 Edit 合并已有 AGENTS.md，而不是覆盖，
- *   这样用户手写内容在重复执行 /init 时不会丢失。
- */
-const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file at the project root. AGENTS.md is loaded into every TEGENT (\`xc\`) session, so future agents will read it as their primary project context.
-
-What to include:
-1. Common commands the agent should prefer: how to build, lint, run tests, run a single test. Only include what's non-obvious from manifest files.
-2. High-level architecture that requires reading multiple files to understand — module boundaries, key data flows, the "big picture" a new contributor needs.
-3. Important conventions that DIFFER from language defaults (e.g. "prefer type over interface", "errors live in errors.ts, never inline").
-4. Non-obvious gotchas, required env vars, repo etiquette (branch naming, commit style).
-
-Usage notes:
-- If AGENTS.md already exists, read it first and use the Edit tool to merge improvements rather than overwriting — preserve the user's hand-written content.
-- Apply the minimalism test to every line: "If I removed this line, would the agent make a mistake?" If no, cut it. AGENTS.md is read every turn — bloat costs tokens forever.
-- If a README.md exists, mine it for project overview / commands / setup steps. If \`.cursor/rules/\`, \`.cursorrules\`, \`.github/copilot-instructions.md\`, \`.windsurfrules\`, or \`.clinerules\` exist, fold the important parts in.
-- Do not list every file or component — those are discoverable via Glob/Grep. Focus on what's NOT discoverable.
-- Do not invent sections like "Common Development Tasks", "Tips for Development", or "Support and Documentation" — only write what's expressly grounded in files you've read.
-- Do not include generic engineering advice ("write clean code", "add tests"), standard language conventions, or obvious commands ("npm test", "cargo test").
-- Personal preferences (the user's role, sandbox URLs, communication style) belong in AGENTS.local.md — gitignored, loaded alongside AGENTS.md. Mention this only if the user has clearly personal context to record; otherwise leave AGENTS.local.md alone.
-
-Prefix the file with:
-
-\`\`\`
-# AGENTS.md
-
-This file is loaded into the agent's context at the start of every session. Keep it concise — the agent reads it every turn.
-\`\`\`
-
-When you finish, summarize what you wrote (or what you changed if updating an existing file) in a few bullets so the user can review.`
-
-/**
- * 构造 `/review` 使用的 prompt 正文。
- *
- * 该模板对齐 Claude Code 本地 /review：引导 agent 直接调用 `gh`，
- * 然后输出结构化代码评审。不带参数的分支被刻意收紧：
- * 如果 `gh pr list` 为空，就说明没有 open PR，直接停止。
- * 否则模型很容易额外花很多工具调用去检查 gh auth、分支、未提交 diff 等，
- * 再转去评审它碰巧发现的东西，既浪费也不是用户请求。
- * “直接用 gh，不要 wrappers”这句是为了抑制模型幻觉出 rtk、gh-aux 等包装命令。
- *
- * @param args - `/review` 后面的原始参数，通常是 PR 编号，也可能为空。
- * @returns 提交给 agent 的 review prompt。
- */
-const REVIEW_PROMPT = (args: string) => `You are an expert code reviewer. Use \`gh\` directly — no wrappers.
-
-If no PR number is provided in the args:
-1. Run \`gh pr list\` to show open PRs.
-2. If the output is empty, reply with exactly: "No open PRs in this repository — re-run \`/review <number>\` to review a specific PR." and stop.
-3. Otherwise, list the open PRs and ask the user which to review. Stop and wait.
-4. Do NOT investigate further — no \`gh auth\`, no branch / diff / status checks, no reviewing uncommitted changes. The user will re-invoke /review.
-
-If a PR number is provided:
-1. Run \`gh pr view <number>\` to get PR details.
-2. Run \`gh pr diff <number>\` to get the diff.
-3. Write a concise but thorough review with clear sections and bullet points covering:
-   - Overview of what the PR does
-   - Code correctness
-   - Project conventions
-   - Performance implications
-   - Test coverage
-   - Security considerations
-   - Specific suggestions and risks
-
-PR number: ${args}`
-
-/**
- * 交互式 CLI 的根 React 组件。
- *
- * App 负责把 core 层的 agent 状态、slash command 处理器、会话恢复、
- * 主题设置、权限弹窗和最终 ChatInput 渲染连接起来。真正的终端绘制由
- * ChatInput 接管，App 更像是“状态和命令调度层”。
- *
- * @param props - App 启动所需的模型、agent 选项和恢复意图。
- * @returns 渲染完整终端交互界面的 ChatInput。
- */
 export function App({
   model,
   options,
-  initialSession,
-  resumeIntent,
   onCleanupReady,
   onSessionInfoReady,
 }: AppProps) {
@@ -381,7 +66,7 @@ export function App({
     abort,
     cleanup, // 保存会话并退出
     clear,
-    compact, // 手动压缩上下文
+    compact,
     resume,
     rewind,
     getCheckpoints,
@@ -396,8 +81,8 @@ export function App({
     addCommandMessage, // 追加命令消息
     addCommandResult, // 追加命令结果
     askQuestion, // 弹出选择器问题
-    setPermissionMode, // 直接设置权限模式
-  } = useAgent(model, options, initialSession)
+    setPermissionMode,
+  } = useAgent(model, options)
 
   // 每次 `/skill refresh` 原地修改注册表时递增。
   // 注册表对象本身的引用在 refresh 前后保持不变，reload() 只是重写内部 map。
@@ -409,7 +94,6 @@ export function App({
   // 当 /skill refresh 推高版本号后重新计算，让 Tab 补全和 /help 无需重启即可看到新 skill。
   const skillCommands = useMemo(
     () => (options.skillRegistry ? options.skillRegistry.list() : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [skillRegistryVersion],
   )
 
@@ -417,7 +101,6 @@ export function App({
   // 它和 skills 共用同一个版本计数；/plugin refresh 重载两个注册表后也会触发刷新。
   const fileCommands = useMemo(
     () => (options.commandRegistry ? options.commandRegistry.list() : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [skillRegistryVersion],
   )
 
@@ -453,7 +136,6 @@ export function App({
   const ctrlCArmWindowMs = 2000
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // arm window 过期后自动清除 notice，避免退出提示长期停留。
   useEffect(() => {
     if (!notice) return
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
@@ -469,7 +151,6 @@ export function App({
   /**
    * 处理 Ctrl+C：双击退出，单击取消当前 turn 并展示退出提示。
    *
-   * 行为对齐 Claude Code：
    * 空闲 + 第一次按下：显示 “Press Ctrl+C again to exit”，开启 2 秒窗口。
    * 空闲 + 第二次按下：退出。
    * 加载中 + 第一次按下：中断当前 turn，显示提示，开启 2 秒窗口。
@@ -493,17 +174,14 @@ export function App({
     setNotice('Press Ctrl+C again to exit')
   }, [exit, abort, state.isLoading])
 
-  // 注册清理函数，供外层 SIGINT / graceful exit 调用。
   useEffect(() => {
     onCleanupReady?.(cleanup)
-  }, [cleanup]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cleanup])
 
-  // 注册退出后的会话信息 getter。
-  // index.ts 会在 resetTerminal 之后调用它，向 shell 区域打印 `Resume: xc --resume <id>`。
-  // getSessionInfo 直接读取 loopStateRef，因此跨渲染保持稳定，挂载时注册一次即可。
+
   useEffect(() => {
     onSessionInfoReady?.(getSessionInfo)
-  }, [getSessionInfo]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [getSessionInfo])
 
   /**
    * 执行 `/resume`：列出当前项目所有历史会话，并让用户选择一个恢复。
@@ -638,40 +316,6 @@ export function App({
     },
     [addInfoMessage, askQuestion, getCheckpoints, rewind],
   )
-
-  // 挂载时处理启动路径。CLI 入口会准备三条互斥路径：
-  //   - initialSession 存在：`xc -c` 已经同步加载了最近会话。
-  //     useAgent 已经把滚动历史恢复出来；这里只需要放一条 banner，
-  //     让用户知道自己恢复了会话，而不是误以为消息莫名其妙预填充。
-  //     这条路径没有额外异步工作，只是视觉提示。
-  //   - resumeIntent === 'pick'：`xc -r` 需要打开选择器。
-  //     这里弹出和 `/resume` 相同的对话框。
-  //   - 都没有：普通启动，无需额外处理。
-  // askQuestion 只有在用户选择后才会 resolve，因此这里把它包在 effect 中并忽略 promise；
-  // Ink 不关心 effect 内仍在等待的异步任务。
-  useEffect(() => {
-    if (initialSession) {
-      const preview = initialSession.firstPrompt.slice(0, 80) || '(no first prompt)'
-      const hint =
-        compactionHintForResume(
-          initialSession.tokenUsage.inputTokens || null,
-          estimateTokenCount(initialSession.messages),
-          initialSession.modelId,
-        ) ?? ''
-      addInfoMessage(
-        `**Resumed session** — ${preview}\n\nRestored ${initialSession.messages.length} message${initialSession.messages.length === 1 ? '' : 's'}. Continuing the same conversation.${hint}`,
-      )
-      return
-    }
-    if (resumeIntent === 'pick') {
-      void handleResume()
-      return
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 早期这里曾尝试通过 effect 执行 `cleanup().then(exit)`，
-  // 但 usePromptInput 持有的 raw stdin 引用会让事件循环在卸载后继续存活，
-  // 导致退出挂起，直到用户按键或调整终端大小。
 
   /**
    * 处理用户提交的输入，包括 slash command 和普通消息。

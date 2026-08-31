@@ -163,42 +163,24 @@ export interface AgentState {
   compressionLabel: string | null
 }
 
-/** 不依赖模型和权限模式的初始 UI 状态；`useAgent` 创建状态时再补上两者。 */
 const initialState: Omit<AgentState, 'modelId' | 'permissionMode'> = {
-  /** 初始没有 scrollback 消息。 */
   messages: [],
-  /** 初始没有 agentLoop 在跑。 */
   isLoading: false,
-  /** 初始没有活动工具。 */
   activeToolCalls: [],
-  /** 初始没有 shell 输出。 */
   shellOutput: '',
-  /** 初始没有权限请求。 */
   permissionQueue: [],
-  /** 初始没有问答弹窗。 */
   pendingQuestion: null,
-  /** 初始 token 用量全部归零。 */
   usage: {
-    /** 输入 token 累计。 */
     inputTokens: 0,
-    /** 输出 token 累计。 */
     outputTokens: 0,
-    /** 总 token 累计。 */
     totalTokens: 0,
-    /** 命中 provider prompt cache 的 token 数。 */
     cacheReadTokens: 0,
-    /** 写入 provider prompt cache 的 token 数。 */
     cacheCreationTokens: 0,
-    /** 当前上下文估算 token 数。 */
     currentContextTokens: 0,
   },
-  /** 初始没有错误。 */
   error: null,
-  /** 初始没有 todo。 */
   todos: [],
-  /** 初始不处于读取链。 */
   bufferingReads: false,
-  /** 初始不处于压缩流程。 */
   compressionLabel: null,
 }
 
@@ -207,24 +189,13 @@ const initialState: Omit<AgentState, 'modelId' | 'permissionMode'> = {
  *
  * @param initialModel 启动时选定的模型实例，后续 `/model` 可通过 `switchModel` 替换。
  * @param options CLI 启动和 slash command 汇总出来的 agent 配置，会在每次提交时传入 core。
- * @param initialSession 通过 `--continue` 或启动恢复加载出来的历史会话；没有恢复时为空。
  * @returns 给 App/ChatInput 使用的一组状态、提交函数、授权/问答 resolver、会话管理和显示辅助方法。
  */
-export function useAgent(initialModel: LanguageModel, options: AgentOptions, initialSession?: LoadedSession | null) {
-  // 如果启动时已经加载了会话（例如 --continue），先把 UI 状态填上历史消息和 token 用量。
-  // 这样用户还没输入新消息时，scrollback 和 /usage 就已经是恢复后的视图。
-  // loopStateRef 会在下面配套的 useEffect 中 hydrate，因为 ref 不能在 useState 初始化器之前设置。
+export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
   const [state, setState] = useState<AgentState>({
-    /** 先展开通用初始值，下面再覆盖需要从 options/session 派生的字段。 */
     ...initialState,
-    /** 当前 UI 显示的模型 id 来自启动配置。 */
     modelId: options.modelId,
-    /** 权限模式默认是 default，也可能由 --plan 等启动参数指定。 */
     permissionMode: options.permissionMode ?? 'default',
-    /** 有历史会话时把 core 消息转换成 UI 消息；否则从空消息开始。 */
-    messages: initialSession ? modelMessagesToDisplay(initialSession.messages) : initialState.messages,
-    /** 有历史会话时恢复 token 用量；否则使用归零值。 */
-    usage: initialSession ? { ...initialSession.tokenUsage } : initialState.usage,
   })
 
   /** 当前模型实例的 ref；避免每次切模型都重建大量回调，下一轮 submit 会读取最新值。 */
@@ -288,15 +259,9 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
     setState((prev) => ({ ...prev, messages: [...prev.messages, msg] }))
   }, [])
 
-  // /** 流式文本缓冲器：把高频 delta 合并后再追加到 messages，减少 ChatInput 重绘次数。 */
-  // const { appendTextDelta, flushBuffer, resetBuffer } = useStreamBuffer(appendMessage)
+
 
   /**
-   * 第一版的直通流式文本追加逻辑。
-   *
-   * 这里刻意绕过 `useStreamBuffer` 的安全边界、批处理和终端重绘优化。
-   * 模型每吐出一个 delta，就直接合并到当前 assistant 流式消息里。
-   * 如果上一条消息不是 assistant 流式消息，就创建一条新的 assistant 消息。
    *
    * @param delta 模型刚产生的文本增量。
    */
@@ -324,30 +289,11 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
     })
   }, [])
 
-  /**
-   * 直通模式没有额外文本缓冲，因此 flush 是 no-op。
-   */
-  const flushBuffer = useCallback(() => {}, [])
-
-  /**
-   * 直通模式没有额外文本缓冲，因此 reset 是 no-op。
-   */
-  const resetBuffer = useCallback(() => {}, [])
-
   // 保持 activeToolCallsLenRef 与 React state 同步。
   // abort() 用这个 ref 区分普通中断和工具执行中断，同时避免把 state 放进 abort 的依赖数组。
   useEffect(() => {
     activeToolCallsLenRef.current = state.activeToolCalls.length
   }, [state.activeToolCalls.length])
-
-  // 首次渲染后，把预加载会话 hydrate 成 core 的 LoopState。
-  // 这样恢复会话后的第一条新消息会带着 existingState 进入 agentLoop，
-  // 继续写同一个会话，而不是新开一段。
-  useEffect(() => {
-    if (initialSession && !loopStateRef.current) {
-      loopStateRef.current = hydrateLoopState(initialSession, options.permissionMode ?? 'default')
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * 初始化记忆和持久化权限规则；每个 CLI 会话只执行一次。
@@ -395,7 +341,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      // 记录本轮是否收到过文本 delta；后面的兜底提取会用它避免重复显示已 flush 的文本。
+      // 记录本轮是否收到过文本 delta；后面的兜底提取会用它避免重复显示已流式输出的文本。
       let sawTextDelta = false
 
       // 这组 callbacks 是 CLI 和 core 的主要通信协议：core 不直接碰 UI，只通过这些回调报告事件。
@@ -410,12 +356,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
           }
           appendTextDelta(delta)
         },
-        /** core 开始执行工具时，把工具登记为 active；直通模式下 flushBuffer 是 no-op。 */
+        /** core 开始执行工具时，把工具登记为 active。 */
         onToolCall: (toolCallId, toolName, input) => {
-          // 同一同步 tick 内完成“刷文本缓冲”和“登记 live 工具行”，让 React 18 自动批处理成一次渲染。
-          // 以前用 4ms setTimeout 跳过超快工具的 Running 帧，但慢工具会产生文本提交帧和工具行帧两次写 stdout，
-          // 文本到工具的过渡会明显闪烁。现在超快工具会短暂闪一下 Running，但慢工具体验更稳定。
-          flushBuffer()
           // 保存工具名、入参和开始时间；工具结果回来时要用它组装 DisplayToolCall 和耗时。
           pendingToolsRef.current.set(toolCallId, { toolName, input, startedAt: Date.now() })
           // 同步更新粘性读取链：可折叠只读工具延续 Reading，Edit/Write/Shell/Task 等会打断它。
@@ -644,7 +586,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
       }
 
       try {
-        // 把输入里的 @path / 裸路径解析成模型可消费的 content parts。
         // 多模态模型拿到图片 part；PDF/Office/非视觉模型拿到抽取文本；没有可附加内容时走纯字符串快路径。
         // onNotice 用于显示摄取阶段事件，例如非视觉模型把图片交给视觉子代理生成 caption。
         const content = await buildUserContent(text, capabilitiesOf(modelIdRef.current), (notice) => {
@@ -677,10 +618,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
         // 保存 core 返回的最新 LoopState；下一次用户输入会继续这段会话。
         loopStateRef.current = agentResult.state
 
-        // 收尾：直通模式下没有额外流式缓冲；保留 flushBuffer 调用是为了以后恢复优化时不改调用点。
-        // 如果 provider 没有发文本 delta（例如只流 reasoning，最终文本在 response.messages），
+        // 收尾：如果 provider 没有发文本 delta（例如只流 reasoning，最终文本在 response.messages），
         // 就从 LoopState 中提取最后一条 assistant 文本，保证用户能看到回复。
-        flushBuffer()
         if (!sawTextDelta && loopStateRef.current) {
           const fallback = extractLastAssistantText(loopStateRef.current.messages)
           if (fallback) {
@@ -718,7 +657,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
         }))
       }
     },
-    [options, initialize, appendTextDelta, flushBuffer, appendMessage],
+    [options, initialize, appendTextDelta, appendMessage],
   )
 
   /**
@@ -800,10 +739,9 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
    * 中断当前正在执行的一轮 agent。
    *
    * 处理顺序刻意保持稳定：
-   * 1. 先调用 flushBuffer；直通模式下它是 no-op，恢复缓冲优化后仍能保证已有文本先显示。
-   * 2. 追加 `[Request interrupted by user]` 或工具中断提示，并同步写入 LoopState。
-   * 3. 同步 resolve 掉授权弹窗、askUser、plan 审批和 slash picker，避免 core 还在 await。
-   * 4. 最后触发 AbortController，让 streamText、shell、工具执行沿 abortSignal 退出。
+   * 1. 追加 `[Request interrupted by user]` 或工具中断提示，并同步写入 LoopState。
+   * 2. 同步 resolve 掉授权弹窗、askUser、plan 审批和 slash picker，避免 core 还在 await。
+   * 3. 最后触发 AbortController，让 streamText、shell、工具执行沿 abortSignal 退出。
    *
    * 没有正在执行的 controller，或 controller 已经 aborted 时，这是 no-op。
    * `isLoading=false`、`activeToolCalls=[]` 等 UI 清理由 submit 的收尾路径统一完成。
@@ -812,9 +750,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
     // 没有当前轮，或当前轮已经被取消过，就不重复写中断消息。
     const controller = abortControllerRef.current
     if (!controller || controller.signal.aborted) return
-
-    // 先刷文本缓冲，保证部分 assistant 回复排在中断提示之前。
-    flushBuffer()
 
     // 工具执行中断要给模型更具体的上下文，下一轮它就知道上次停在工具使用阶段。
     const forToolUse = activeToolCallsLenRef.current > 0
@@ -860,7 +795,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
 
     // 最后广播 abort 信号，让底层异步任务开始退出。
     controller.abort()
-  }, [flushBuffer, appendMessage])
+  }, [appendMessage])
 
   /**
    * 保存当前会话并执行退出清理。
@@ -899,11 +834,9 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
     // 清掉所有未完成工具和权限 resolver，避免旧会话的异步回调影响新会话。
     pendingToolsRef.current.clear()
     permissionResolversRef.current = []
-    // 清掉流式文本缓冲，避免旧文本被下一轮 flush。
-    resetBuffer()
     // /clear 只清对话，不清会话级设置；用户刚选的模型和 plan/default 模式应保留。
     setState((prev) => ({ ...initialState, modelId: prev.modelId, permissionMode: prev.permissionMode }))
-  }, [resetBuffer])
+  }, [])
 
   /**
    * 在当前 CLI 会话中热切换到一个已保存的历史会话。
@@ -919,9 +852,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
    */
   const resume = useCallback(
     (loaded: LoadedSession) => {
-      // 旧会话的 pending 工具和流式缓冲不能带进恢复后的会话。
+      // 旧会话的 pending 工具不能带进恢复后的会话。
       pendingToolsRef.current.clear()
-      resetBuffer()
       // hydrate 后的 LoopState 保留 sessionId/taskSlug，从而继续写同一个 jsonl。
       loopStateRef.current = hydrateLoopState(loaded, permissionModeRef.current)
       // core 消息模型转换为 CLI 展示模型。
@@ -939,7 +871,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
         usage: { ...loaded.tokenUsage },
       }))
     },
-    [resetBuffer],
+    [],
   )
 
   /**
@@ -1007,7 +939,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
 
       // 用截断后的会话重建 UI messages。长度变短会触发 ChatInput 清屏重绘，视觉语义类似 /clear。
       pendingToolsRef.current.clear()
-      resetBuffer()
       const converted = modelMessagesToDisplay(ls.messages)
       setState((prev) => ({
         ...prev,
@@ -1020,7 +951,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
 
       return { ok: true, preview: target.userPrompt, messageCount: newLen }
     },
-    [resetBuffer, state.isLoading],
+    [state.isLoading],
   )
 
   /**
@@ -1119,7 +1050,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions, ini
   const { addInfoMessage, addUserMessage, echoCommand, addCommandMessage, addCommandResult } =
     useAgentDisplayHelpers(appendMessage)
 
-  // 对外暴露给 App.tsx/ChatInput.tsx 的完整控制面：state 用于渲染，函数用于驱动 core 或解析 UI 事件。
   return {
     state,
     submit,

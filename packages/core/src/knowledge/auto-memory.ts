@@ -299,7 +299,7 @@ let userMemory: AutoMemory | null = null
 
 // 根据当前工作目录计算项目级自动记忆文件路径。
 function projectMemoryPath(cwd: string): string {
-  // XCODE_DIR 通常是 `.tegent`；最终路径形如 `<cwd>/.tegent/memory/auto.md`。
+  // 最终路径形如 `<cwd>/.tegent/memory/auto.md`。
   return path.join(cwd, TEGENT_DIR, 'memory', 'auto.md')
 }
 
