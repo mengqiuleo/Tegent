@@ -881,6 +881,7 @@ export function App({
   const { handlePlugin } = createPluginCommandHandler({
     options,
     addCommandMessage,
+    addCommandResult,
     askQuestion,
     invalidateSystemPromptCache,
     bumpSkillRegistryVersion: () => setSkillRegistryVersion((v) => v + 1),

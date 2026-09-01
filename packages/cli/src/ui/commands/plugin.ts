@@ -26,6 +26,8 @@ export interface PluginCommandDeps {
   options: AgentOptions
   /** 把命令结果渲染到聊天界面：text 为用户原始输入，content 为 markdown 内容 */
   addCommandMessage: (text: string, content: string) => void
+  /** 在最近一次命令回显下方追加紧凑的 `⎿` 结果行（异步命令的增量输出） */
+  addCommandResult: (content: string) => void
   /** 向用户弹出选项式询问（`/plugin refresh` 的信任确认流程会用到） */
   askQuestion: (
     question: string,
@@ -86,7 +88,7 @@ function parsePluginScopeFlag(arg: string): { id: string; scope: PluginScope } {
  * @returns `{ handlePlugin }` — `/plugin` 命令的总入口
  */
 export function createPluginCommandHandler(deps: PluginCommandDeps) {
-  const { options, addCommandMessage, askQuestion, invalidateSystemPromptCache, bumpSkillRegistryVersion } = deps
+  const { options, addCommandMessage, addCommandResult, askQuestion, invalidateSystemPromptCache, bumpSkillRegistryVersion } = deps
 
   /**
    * `/plugin list`：列出已安装的插件。
@@ -724,7 +726,12 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
         addCommandMessage(text, rest ? `No marketplace \`${rest}\` subscribed.` : 'No marketplaces subscribed.')
         return
       }
-      const lines: string[] = [`Refreshing ${targets.length} marketplace${targets.length === 1 ? '' : 's'} …`]
+      // fetchMarketplace 是网络请求，可能耗时数秒。先立即回显命令并给出
+      // 进行中提示，避免输入已提交、界面却无任何反馈的"空窗期"；结果在
+      // 完成后经 addCommandResult 追加到同一命令块下方（与 /mcp refresh
+      // 的两段式输出模式一致）。
+      addCommandMessage(text, `Refreshing ${targets.length} marketplace${targets.length === 1 ? '' : 's'} …`)
+      const lines: string[] = []
       for (const t of targets) {
         try {
           const m = await fetchMarketplace(t)
@@ -733,7 +740,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
           lines.push(`  ✗ ${t.name} — ${err instanceof Error ? err.message : String(err)}`)
         }
       }
-      addCommandMessage(text, lines.join('\n'))
+      addCommandResult(lines.join('\n'))
       return
     }
 
