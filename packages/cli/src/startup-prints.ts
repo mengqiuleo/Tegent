@@ -16,10 +16,6 @@ const chalk = new Chalk({ level: process.stderr.isTTY ? 3 : 0 }) // 根据 stder
  * 给出一条可复制的持久化配置命令。
  */
 export function printNoApiKeyMessage(): void {
-  const code = (s: string) => chalk.cyan(s) // 定义代码片段样式，让可复制命令更醒目。
-  const comment = (s: string) => chalk.gray(s) // 定义辅助说明样式，让提示层级更弱。
-  const envName = (s: string) => chalk.yellow(s) // 定义环境变量名样式，方便用户快速扫到 key 名称。
-
   console.error(chalk.red.bold('Error: No API key found.') + '\n') // 输出红色加粗错误标题，并额外空一行。
   console.error('Set at least one provider API key via environment variable:\n') // 提示用户至少配置一个 provider 环境变量。
 } 

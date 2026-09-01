@@ -1,48 +1,41 @@
-// 正式构建时，版本号由 esbuild 的 define 机制在构建期注入。
-// 全局常量 __CLI_VERSION__ 来自 esbuild.config.js 对 package.json 的读取，
-// 因此发布产物运行时不需要再访问文件系统。使用 `tsx src/index.ts`
-// 启动开发模式时，则回退为从本地 package.json 中读取版本号。
-import { existsSync, readFileSync } from 'node:fs' 
+// 版本号在运行时通过向上查找 @tegent/cli 的 package.json 解析。
+// npm 发布的包总会自带 package.json（npm 强制将其打入 tarball），因此无论是
+// `tsx src/index.ts` 开发模式，还是从 dist/ 运行的构建产物（含 npm 安装后的
+// 全局 bin），都能在包根目录找到它。查找基于 import.meta.url 而非 cwd，
+// 在任意工作目录下执行 CLI 均可正确解析。
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-declare const __CLI_VERSION__: string | undefined // 声明构建期注入的全局版本常量；开发模式下可能不存在。
 
 /**
  * 解析当前 CLI 的版本号。
  *
- * 正式构建产物优先使用构建期注入的 `__CLI_VERSION__`，以避免运行时文件读取。
- * 如果该值不存在，则认为当前可能运行在 tsx 开发模式中，于是从当前文件所在目录
- * 开始向上查找 `@tegent/cli` 的 package.json，并读取其中的 version 字段。
- * 所有失败都会回退到 `0.0.0-dev`。
+ * 从当前文件所在目录开始向上（最多 6 层）查找 `@tegent/cli` 的 package.json，
+ * 读取其中的 version 字段。开发模式下当前文件位于 src/，构建产物位于 dist/，
+ * 向上一层即可到达包根目录；npm 安装后 package.json 依然在包根目录，逻辑不变。
+ * 所有失败路径都会回退到 `0.0.0-dev`。
  *
  * @returns 当前 CLI 版本号；无法解析时返回开发占位版本 `0.0.0-dev`。
  */
-function resolveVersion(): string { 
-  // 构建期 define 注入的版本号优先级最高。
-  if (typeof __CLI_VERSION__ === 'string' && __CLI_VERSION__) { 
-    return __CLI_VERSION__
-  } 
-
-  // 开发模式回退：从当前文件目录开始向上查找 package.json。
-  try { 
+function resolveVersion(): string {
+  try {
     let dir = dirname(fileURLToPath(import.meta.url))
     for (let i = 0; i < 6; i++) {
-      const pkgPath = join(dir, 'package.json') 
+      const pkgPath = join(dir, 'package.json')
       if (existsSync(pkgPath)) {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { name?: string; version?: string } 
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { name?: string; version?: string }
         if (pkg.name === '@tegent/cli' && pkg.version) {
           return pkg.version
-        } 
-      } 
-      const parent = dirname(dir) 
+        }
+      }
+      const parent = dirname(dir)
       if (parent === dir) break
       dir = parent
-    } 
-  } catch { 
-    
-  } 
-  return '0.0.0-dev' 
-} 
+    }
+  } catch {
+
+  }
+  return '0.0.0-dev'
+}
 
 export const VERSION = resolveVersion()
