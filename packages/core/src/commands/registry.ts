@@ -161,8 +161,7 @@ export function expandCommandBody(cmd: CommandDefinition, args: string): string 
     try {
       fs.mkdirSync(dataDir, { recursive: true })
     } catch {
-      // mkdir 失败时仍保留 dataDir 字符串；如果后续命令脚本真的写入该目录，
-      // 用户会从 shell 错误里看到更具体的失败原因。
+
     }
   }
   // 替换顺序刻意把带花括号的形式和裸 `$ARGUMENTS` 都覆盖，兼容不同 command 文件写法。

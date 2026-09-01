@@ -1,6 +1,3 @@
-// Extracted from tool-execution.ts to keep handleToolCall at a manageable
-// size. Each handler has the same contract: mutate state + push result via
-// pushToolResult, and return void.
 import type { AgentCallbacks, AgentOptions, TodoItem } from '../types/index.js'
 import { extractText } from '../utils/message-helpers.js'
 import type { LoopState } from './loop-state.js'
@@ -186,7 +183,6 @@ export async function handleExitPlanMode(
       savedPath = await writePlan(planPath, planBody)
       state.currentPlanPath = savedPath
     } catch {
-      // Non-fatal — approval dialog uses the in-memory body.
     }
   }
 

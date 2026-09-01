@@ -231,11 +231,8 @@ export function buildSubAgentSystemPrompt(options: {
   // 当前目录是否是 git 仓库；会写进子 agent 的环境信息里。
   isGitRepo: boolean
 }): string {
-  // shell provider 统一封装当前平台 shell，例如 zsh、bash、powershell。
   const shellProvider = getShellProvider()
 
-  // 返回完整子 agent system prompt。
-  // 模板里保留英文，因为这是实际给模型看的行为契约，不是注释。
   return `You are a specialized subagent invoked by a parent coding assistant.
 
 # Your role
@@ -287,17 +284,12 @@ function formatSkillCapabilities(skills: readonly { name: string; description: s
   // 这是给模型看的安装目标路径示例，`<name>` 只是占位符，不是真实目录名。
   const userSkillsDir = path.join(USER_TEGENT_DIR, 'skills', '<name>', 'SKILL.md')
 
-  // 安装提示强调必须下载 raw 文件。
-  // 原因是 webFetch 会渲染 markdown，可能破坏 SKILL.md 顶部 YAML frontmatter。
   const installHint = `To install a skill from a URL: use the shell tool to download the raw file directly (e.g. \`Invoke-WebRequest -Uri <url> -OutFile "${userSkillsDir}"\` on Windows, or \`curl -L <url> -o "${userSkillsDir}"\` on macOS/Linux), then confirm the path. Do NOT use webFetch + write — webFetch renders markdown and corrupts YAML frontmatter. Alternatively, use /skill install <url>. After installing, run /skill refresh to load the new skill in this session, or restart xc.`
 
-  // skills 为 undefined 或空数组时，说明当前没有可用 skill。
   if (!skills || skills.length === 0) {
-    // 仍然返回安装提示，让模型知道用户要求安装 skill 时该怎么做。
     return `\n\n## Skills\n${installHint}`
   }
 
-  // lines 是最终追加到 system prompt 的多行文本。
   const lines = [
     '',
     '',
@@ -305,15 +297,12 @@ function formatSkillCapabilities(skills: readonly { name: string; description: s
     "Use the activateSkill tool to inject a skill's instructions when the task matches its description:",
   ]
 
-  // 把每个启用的 skill 写成 `- name: description`，便于模型按描述判断是否激活。
   for (const s of skills) {
     lines.push(`- ${s.name}: ${s.description}`)
   }
 
-  // 最后附上安装提示，覆盖“用户要求安装新 skill”的场景。
   lines.push('', installHint)
 
-  // 用换行拼成一个 prompt 片段。
   return lines.join('\n')
 }
 
@@ -328,10 +317,8 @@ function formatSkillCapabilities(skills: readonly { name: string; description: s
  * listMcpResources 和 readMcpResource。
  * 因为这两个工具只会在 MCP 激活时注册，它们的说明必须跟 MCP block 一起出现。 */
 function formatMcpCapabilities(mcpTools: readonly SystemPromptMcpTool[] | undefined): string {
-  // undefined 表示没有 MCP registry；直接返回空，避免改变非 MCP 会话的 prompt。
   if (mcpTools === undefined) return ''
 
-  // MCP block 的固定头部；前两个空字符串用于在 BASE_SYSTEM_PROMPT 后插入空行。
   const lines: string[] = [
     '',
     '',
@@ -341,43 +328,30 @@ function formatMcpCapabilities(mcpTools: readonly SystemPromptMcpTool[] | undefi
     '- readMcpResource: Read the contents of an MCP resource by URI (URIs come from listMcpResources).',
   ]
 
-  // MCP 已启用但没有额外工具时，只返回固定头部和 resource 工具说明。
   if (mcpTools.length === 0) {
     return lines.join('\n')
   }
 
-  // 按 server 分组展示，模型更容易看出工具来源。
-  // 每个分组内部保持 registry 传入顺序，这个顺序本身应该是稳定的。
   const byServer = new Map<string, SystemPromptMcpTool[]>()
 
-  // 遍历所有 MCP 工具，把同一个 server 的工具放进同一个数组。
   for (const t of mcpTools) {
-    // 如果这个 server 已经有数组就复用，否则创建空数组。
     const list = byServer.get(t.serverName) ?? []
 
-    // 把当前工具加入所属 server 的列表。
     list.push(t)
 
-    // 写回 Map；新建数组时必须写回，复用数组时也保持逻辑一致。
     byServer.set(t.serverName, list)
   }
 
-  // 逐个输出 server 分组。
   for (const [server, tools] of byServer) {
-    // 每个 server 用三级标题分隔。
     lines.push('', `### Server: ${server}`)
 
-    // 输出该 server 下的所有工具。
     for (const t of tools) {
-      // description 为空时不加冒号，避免生成 `tool:` 这种尾巴。
       const desc = t.description ? `: ${t.description}` : ''
 
-      // 单行描述一个 MCP 工具。
       lines.push(`- ${t.callableName}${desc}`)
     }
   }
 
-  // 拼成最终 MCP prompt 片段。
   return lines.join('\n')
 }
 
@@ -418,40 +392,23 @@ export function buildSystemPrompt(options?: {
    *  没有 skill 时仍会追加安装提示，方便模型处理安装请求。 */
   skills?: readonly { name: string; description: string }[]
 }): string {
-  // 获取当前平台 shell 信息，用来替换 `{shell}`，也让模型生成平台匹配的命令。
   const shellProvider = getShellProvider()
 
-  // 从基础模板开始，逐个替换动态占位符。
   let prompt = BASE_SYSTEM_PROMPT.replace(/\{platform\}/g, process.platform)
-    // 替换当前 shell 类型，例如 zsh、bash、powershell。
     .replace(/\{shell\}/g, shellProvider.type)
-
-    // 替换当前工作目录。
     .replace(/\{cwd\}/g, process.cwd())
-
-    // 替换当前模型 id；没有传时用 unknown，避免占位符漏到 prompt 里。
     .replace(/\{model\}/g, options?.modelId ?? 'unknown')
-
-    // 替换 git 仓库状态。
     .replace(/\{isGitRepo\}/g, options?.isGitRepo ? 'yes' : 'no')
-
-    // 插入 MCP 能力说明；未启用 MCP 时这里会是空字符串。
     .replace(/\{mcpCapabilities\}/g, formatMcpCapabilities(options?.mcpTools))
-
-    // 插入 Skills 能力说明或安装提示。
     .replace(/\{skillCapabilities\}/g, formatSkillCapabilities(options?.skills))
 
-  // 如果有知识上下文，就追加到 system prompt 末尾。
-  // 越靠后的内容通常离模型更近，更容易影响本轮行为。
   if (options?.knowledgeContext) {
     prompt += '\n\n' + options.knowledgeContext
   }
 
-  // plan mode 时追加只读规划规则，并把 plan 文件路径替换进去。
   if (options?.planMode) {
     prompt += PLAN_MODE_OVERLAY.replace(/\{planFilePath\}/g, options.planFilePath ?? '<unset>')
   }
 
-  // 返回最终发给模型的完整 system prompt。
   return prompt
 }

@@ -93,10 +93,8 @@ function renderTranscript(messages: ModelMessage[]): string {
   // 只截取尾部消息，避免把很久之前的陈旧上下文拿来写长期记忆。
   const tail = messages.slice(-MAX_TRANSCRIPT_MESSAGES)
 
-  // lines 是最终输出的 markdown-ish transcript。
   const lines: string[] = []
 
-  // 逐条处理最近消息。
   for (const msg of tail) {
     // 先拿 role，后面会作为 `### user` / `### assistant` 标题。
     const role = msg.role
@@ -104,29 +102,20 @@ function renderTranscript(messages: ModelMessage[]): string {
     // system prompt 不是用户对话内容，不应该参与记忆抽取。
     if (role === 'system') continue
 
-    // ModelMessage.content 可能是字符串，也可能是多 part 数组。
     const content = msg.content
 
-    // 字符串内容最简单：trim 后直接写进 transcript。
     if (typeof content === 'string') {
       lines.push(`### ${role}\n${content.trim()}`)
       continue
     }
 
-    // 非字符串、非数组的内容不在本抽取器处理范围内，跳过。
     if (!Array.isArray(content)) continue
 
-    // parts 收集这条消息中对记忆抽取有用的文本或工具标记。
     const parts: string[] = []
 
-    // 遍历消息的每个 part。
     for (const part of content as Array<{
-      // part 类型，例如 text/tool-call/tool-result。
       type?: string
-
-      // text part 的自然语言内容。
       text?: string
-
       // tool-call part 里可能带工具名，用于生成 `[tool-call: name]` 标记。
       toolName?: string
     }>) {
@@ -142,14 +131,11 @@ function renderTranscript(messages: ModelMessage[]): string {
       }
     }
 
-    // 去掉空 part 后用换行拼成这条消息的正文。
     const body = parts.filter(Boolean).join('\n').trim()
 
-    // 只有正文非空时才写入 transcript。
     if (body) lines.push(`### ${role}\n${body}`)
   }
 
-  // 多条消息之间空一行，方便模型区分轮次。
   return lines.join('\n\n')
 }
 
@@ -270,20 +256,13 @@ export async function runMemoryExtractor(args: RunMemoryExtractorArgs): Promise<
 // 真正执行一次记忆抽取。
 // runMemoryExtractor 负责排队，doExtract 负责：检查早退条件 -> 渲染 prompt -> 调模型 -> 写 AutoMemory。
 async function doExtract(args: RunMemoryExtractorArgs): Promise<void> {
-  // 解构参数，后面使用更清楚。
   const { parentState, parentModel, abortSignal, onWrite } = args
 
-  // 早退条件都放在真正发起模型调用之前，省 token，也避免取消后继续写记忆。
-  // 如果父回合已经取消，就不再启动后台模型调用。
   if (abortSignal?.aborted) return
-
-  // 对话太短通常没有长期事实；跳过可以省一次 generateText 调用。
   if (parentState.messages.length < MIN_TRANSCRIPT_MESSAGES) return
 
-  // 把最近消息渲染成简化 transcript。
   const transcript = renderTranscript(parentState.messages)
 
-  // 如果渲染后没有任何可读内容，也没有抽取价值。
   if (!transcript) return
 
   // 快照现有记忆，让模型能发现和已保存事实的语义重叠。
@@ -292,87 +271,46 @@ async function doExtract(args: RunMemoryExtractorArgs): Promise<void> {
   // existing 会被放进 USER_TEMPLATE 的 Existing memory 区域。
   const existing = renderExistingMemory()
 
-  // 记录开始时间，done 日志里会输出耗时。
   const startTime = Date.now()
 
   try {
-    // 发起一次独立的模型调用，要求模型按 MemorySchema 返回结构化对象。
     const { output: object } = await generateText({
-      // 使用父 agent 同一个模型。
       model: parentModel,
-
-      // 抽取规则：哪些可以保存、哪些必须忽略、如何分类。
       system: SYSTEM_PROMPT,
-
-      // 用户消息里包含现有记忆和最近 transcript。
       prompt: USER_TEMPLATE(transcript, existing),
-
-      // 要求 AI SDK 把模型输出解析成符合 zod schema 的对象。
       output: Output.object({ schema: MemorySchema }),
-
-      // 透传取消信号，父回合 abort 时这次后台请求也可以被取消。
       abortSignal,
     })
 
-    // 记忆日期由本地生成，避免模型自己编日期。
     const today = new Date().toISOString().slice(0, 10)
 
-    // 统计本次实际写入了多少条。
     let written = 0
 
-    // 虽然 schema 已经限制 max，这里再 slice 一次做纵深防御。
     for (const m of object.memories.slice(0, MAX_MEMORIES_PER_PASS)) {
-      // 只把 schema 校验后的字段转成 AutoMemory 的事实结构，日期由本地生成。
       const fact: KnowledgeFact = {
-        // key 决定同分类下是否覆盖旧事实。
         key: m.key,
-
-        // fact 是要写入 auto.md 的实际内容。
         fact: m.fact,
-
-        // category 已经过 zod 校验，只能是 user/feedback/project/reference。
         category: m.category,
-
-        // 使用本地 today，而不是信任模型输出日期。
         date: today,
       }
       try {
-        // 根据模型给出的 scope 写入用户级或项目级 AutoMemory。
         getAutoMemory(m.scope).add(fact)
 
-        // 写入成功后更新计数。
         written++
 
-
-        // 写入成功后再通知 UI。这里单独 try/catch，避免 UI 回调异常中断本批其它写入。
         if (onWrite) {
           try {
-            // UI 只需要展示 scope/category/key/fact，不需要内部 date 字段。
             onWrite({ scope: m.scope, category: m.category, key: m.key, fact: m.fact })
           } catch {
-            // 故意吞掉。
           }
         }
       } catch (err) {
-        // AutoMemory.add 内部把 FS 写入排队；这里通常只会捕获校验类异常。
-        // category 已经被 zod 校验过，所以理论上不该发生。
-        // 这里吞掉单条失败，继续处理后面的 memories。
         const msg = err instanceof Error ? err.message : String(err)
-
       }
     }
-
-
   } catch (err) {
-    // 如果是父回合取消导致的失败，不当作真正错误记录。
     if (abortSignal?.aborted) {
-
       return
     }
-
-    // 捕获 NoOutputGeneratedError、网络错误、schema 重试耗尽等问题。
-    // 用户没有在等待这个后台任务，所以只写 debugLog 然后结束。
-    const msg = err instanceof Error ? err.message : String(err)
-
   }
 }

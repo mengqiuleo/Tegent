@@ -1,5 +1,4 @@
-// 本文件负责校验 ~/.tegent/config.json 以及项目级
-// .tegent/config.json 中的 `mcpServers` 字段。
+// 本文件负责校验 ~/.tegent/config.json 以及项目级 .tegent/config.json 中的 `mcpServers` 字段。
 // 同一个模式同时覆盖 stdio 和 streamable HTTP 两种服务器；
 // 通过字段是否存在来区分传输类型：有 `command` 表示 stdio，
 // 有 `url` 表示 HTTP。既没有这两个字段，或者两个字段同时存在，

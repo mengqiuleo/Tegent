@@ -2,7 +2,6 @@
 // 自动借用另一个已配置且支持视觉的 provider，把它当作图片描述子代理。
 // 生成的 caption 会作为 TextPart 注入用户消息，让主模型看到图片描述，而不是接收二进制。
 //
-// 为什么需要它：
 // DeepSeek 用户过去只能用本地 tesseract OCR。OCR 处理代码截图还行，
 // 但对 UI mockup、图表、照片几乎不够用。很多配置 DeepSeek 的用户同时也有
 // Gemini 或 GLM-4V-Flash 这类免费/低价视觉 provider 的 key；
@@ -18,7 +17,6 @@ import { createModelRegistry } from '../providers/registry.js'
 import { LruCache } from '../utils/lru-cache.js'
 import { mediaTypeFor } from '../utils/media-type.js'
 
-// 中文导读：
 // 当主模型不能看图时，这里会自动挑一个已配置的视觉模型做“图片描述子代理”。
 // 生成的描述会作为 TextPart 注入给主模型。这样 DeepSeek/custom 这类文本模型
 // 也能处理截图、设计稿、照片等任务；没有视觉 provider 时再退回本地 OCR。
@@ -89,8 +87,6 @@ export async function captionImage(filePath: string, sub: VisionProvider): Promi
   const key = await cacheKey(filePath, sub.modelId)
   const cached = captionCache.get(key)
   if (cached != null) {
-    // 同一会话里重复附图时直接复用 caption，省一次模型调用。
-
     return cached
   }
 
@@ -103,7 +99,6 @@ export async function captionImage(filePath: string, sub: VisionProvider): Promi
 
 
   const { text } = await generateText({
-    // 这里不是让视觉模型“回答用户问题”，而是生成足够详尽的中间描述给文本主模型使用。
     model,
     messages: [
       {

@@ -101,7 +101,6 @@ async function loadAgentsFromDir(
   try {
     entries = await fs.readdir(dir)
   } catch {
-    // 目录不存在或不可读时视为空目录。自定义 agent 是可选能力，不能阻断启动。
     return agents
   }
 
@@ -171,8 +170,6 @@ async function loadAgentsFromExtras(extras: LoadCustomAgentsOptions['extraDirs']
   if (!extras || extras.length === 0) return []
   const out: SubAgentDefinition[] = []
   for (const { dir, pluginId } of extras) {
-    // 插件贡献目前归入 user source：它不是项目内定义，也不是内置定义。
-    // pluginId 会额外保留，供展示、刷新和归属追踪使用。
     out.push(...(await loadAgentsFromDir(dir, 'user', pluginId)))
   }
   return out

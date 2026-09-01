@@ -52,8 +52,6 @@ async function readConfigObject(scope: ConfigScope, cwd: string): Promise<Record
       return parsed as Record<string, unknown>
     }
   } catch {
-    // JSON 损坏时不允许继续覆盖原文件。
-    // 如果这里返回空对象，后续写入会把用户原本的配置整个抹掉。
     throw new Error(`Config file at ${file} is not valid JSON. Fix it manually before running /mcp add or /mcp remove.`)
   }
   return {}

@@ -187,7 +187,6 @@ export async function downgradeBinaryPartsForProvider(messages: ModelMessage[], 
               const buffer = Buffer.from(data, 'base64')
               text = await ocrBuffer(buffer)
             } catch {
-              // 失败时沿用占位文本。
             }
             rewritten.push({
               type: 'text',

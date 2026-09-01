@@ -15,7 +15,6 @@ import { lightCompactMessages, truncateOldToolResults } from './light-compact.js
 import type { LoopState } from './loop-state.js'
 import { markBoundaryAndReflush } from './session-store.js'
 
-// 中文导读：
 // 这个文件负责上下文窗口压缩。正常情况下每轮前会主动检查 token 阈值；
 // 如果 provider 已经报“上下文太长”，则走响应式压缩并让外层重试本轮。
 // 压缩优先级是：轻量删除重复工具调用 -> 截断旧工具结果 -> 调 LLM 生成摘要。
@@ -26,8 +25,6 @@ import { markBoundaryAndReflush } from './session-store.js'
 export interface CompactionHookContext {
   // 插件事件总线；没有插件、插件关闭、或调用方不关心 hook 时可以不传。
   hookBus?: HookBus
-
-  // 当前使用的模型 id，例如 `openai:gpt-4.1`；hook 可以用它做记录或分支判断。
   modelId: string
 
   // 当前工作目录；hook 需要知道这次压缩属于哪个项目。
@@ -61,23 +58,16 @@ export async function compressMessages(messages: ModelMessage[], model: Language
   // old 是要交给 LLM 总结的旧消息前缀。
   const old = messages.slice(0, -keepCount)
 
-  // 如果没有旧消息可压缩，说明消息数太少或都被保护了，直接返回原数组。
   if (old.length === 0) return messages
 
   // 这是昂贵路径：会额外发起一次模型调用。
   const { text: summary } = await generateText({
-    // 使用当前 agent loop 的同一个模型来写摘要。
     model,
-
-    // system 指令要求模型保留继续任务所需的信息，而不是写闲聊总结。
     system:
       'Summarize the following conversation concisely, preserving key decisions, file changes, and context needed to continue.',
-
-    // 只把旧消息发给摘要器；recent 消息会原样拼回去，不需要总结。
     messages: old,
   })
 
-  // 用一条 user 消息承载摘要，再接上 recent 原文，形成新的压缩后上下文。
   return [{ role: 'user', content: `[Previous conversation summary]\n${summary}` }, ...recent]
 }
 
@@ -109,7 +99,6 @@ export async function checkAndCompressContext(
   // estimateTokenCount 是本地按字符估算的兜底值。
   const needsCompression = state.lastInputTokens > threshold || estimateTokenCount(state.messages) > threshold
 
-  // 不需要压缩，或者消息数量少到连最近消息都不够保留时，直接退出。
   if (!needsCompression || state.messages.length <= KEEP_RECENT) return
 
   // PreCompact 在任一压缩路径执行前触发。
@@ -120,7 +109,6 @@ export async function checkAndCompressContext(
   // 再记录压缩前 token 估算，hook 或日志可以用它衡量压缩收益。
   const tokenEstimateBefore = estimateTokenCount(state.messages)
 
-  // 通知插件：马上要主动压缩了。这个 helper 内部会补 session 信息并吞掉 hook 错误。
   emitCompactionHook(hookCtx, {
     name: 'PreCompact',
     trigger: 'proactive',
@@ -128,7 +116,6 @@ export async function checkAndCompressContext(
     tokenEstimate: tokenEstimateBefore,
   })
 
-  // 告诉 UI：第一步先尝试删除重复/无价值的工具调用。
   callbacks.onCompressionProgress?.('Removing duplicate tool calls...')
 
   // 轻量删除 loop-guard tool-call/result 对；不调用 LLM，也不改原数组。
@@ -142,12 +129,11 @@ export async function checkAndCompressContext(
     // 删除后重新估算 token，看是否已经低于阈值。
     const stillOver = estimateTokenCount(state.messages) > threshold
 
-    // 告诉 UI 这一步回收了多少消息，以及是否还要继续进入摘要路径。
     callbacks.onContextCompressed(
       `Dropped ${light.dropped} looped tool-call message(s) to reclaim context${stillOver ? ' — still over threshold, summarising' : ''}.`,
     )
 
-    // 如果轻量删除已经足够，就不用花钱调用 LLM 摘要。
+    // 如果轻量删除已经足够，就不用调用 LLM 摘要。
     if (!stillOver) {
       // 轻量压缩成功：写入 boundary，避免 resume 时把已删除的 loop-guard 对复活。
       // 它们仍在 boundary 前的磁盘记录里，但 loader 会从最新 boundary 后开始取。
@@ -155,7 +141,6 @@ export async function checkAndCompressContext(
       // fire-and-forget：保存失败不影响本轮继续，但 session-store 内部会尽力落盘。
       void markBoundaryAndReflush(state)
 
-      // 通知插件：主动压缩已经结束；summary 为空表示这次没有 LLM 摘要文本。
       emitCompactionHook(hookCtx, {
         name: 'PostCompact',
         trigger: 'proactive',
@@ -166,7 +151,6 @@ export async function checkAndCompressContext(
     }
   }
 
-  // 告诉 UI：第二步尝试把老旧的大型工具输出截短成 stub。
   callbacks.onCompressionProgress?.('Truncating old tool results...')
 
   // 截断旧 tool-result。这个函数为了效率会原地修改 state.messages。
@@ -198,7 +182,7 @@ export async function checkAndCompressContext(
     }
   }
 
-  // 前两种便宜压缩还不够，才进入真正昂贵的 LLM 摘要路径。
+  // 前两种便宜压缩还不够，才进入真正的 LLM 摘要路径。
   callbacks.onCompressionProgress?.('Generating session summary...')
 
   // summaryText 会写入 compact-boundary 元数据，供恢复/会话选择器等路径使用。
@@ -206,27 +190,20 @@ export async function checkAndCompressContext(
 
   // 先尝试生成结构化会话摘要；这份摘要不是直接替换 state.messages 的那条摘要。
   try {
-    // generateSessionSummary 会返回带 title/keyResults/pendingWork 等字段的结构化结果。
     const summary = await generateSessionSummary(state.messages, model, state.sessionId, state.startedAt, [
-      // 复制一份 filesModified，避免摘要函数意外持有可变数组引用。
       ...state.filesModified,
     ])
 
-    // compact-boundary 只需要其中的 summary 文本。
     summaryText = summary.summary
   } catch {
-    // 结构化摘要生成失败：用空文本继续。
-    // 下面的 compressMessages 仍会做自己的 LLM 摘要，所以上下文仍会缩小；
-    // 只是 boundary line 上少了给 picker UX 使用的结构化摘要。
+
   }
 
-  // 告诉 UI：现在开始真正改写对话上下文。
+
   callbacks.onCompressionProgress?.('Summarizing conversation...')
 
-  // 记录压缩前估算 token，稍后用于展示压缩效果。
   const tokensBefore = estimateTokenCount(state.messages)
 
-  // 把旧消息压成一条 `[Previous conversation summary]`，最近消息保持原文。
   state.messages = await compressMessages(state.messages, model)
 
   // 压缩后不能再信任上一轮 provider 返回的 input token，所以清零。
@@ -243,16 +220,11 @@ export async function checkAndCompressContext(
   // summaryText 会跟 boundary 写在一起；如果为空，也会保留正常 boundary 语义。
   void markBoundaryAndReflush(state, summaryText)
 
-  // UI 展示用 k token 粗略数字，避免显示太细的估算值。
   const beforeK = Math.round(tokensBefore / 1000)
-
-  // 同上，压缩后的估算 token。
   const afterK = Math.round(tokensAfter / 1000)
 
-  // 告诉 UI 压缩完成，以及大约从多少 token 降到多少 token。
   callbacks.onContextCompressed(`Context compressed: ~${beforeK}k → ~${afterK}k tokens.`)
 
-  // 通知插件：主动压缩完成，并附上结构化摘要里的 summary 文本。
   emitCompactionHook(hookCtx, {
     name: 'PostCompact',
     trigger: 'proactive',
@@ -279,10 +251,8 @@ export async function handleContextTooLong(
   // 可选 hook 上下文，用来通知插件 PreCompact/PostCompact。
   hookCtx?: CompactionHookContext,
 ): Promise<boolean> {
-  // 消息太少时无法安全压缩，因为至少要保留最近 KEEP_RECENT 条原文。
   if (state.messages.length <= KEEP_RECENT) return false
 
-  // 通知插件：provider 已经报上下文太长，现在准备响应式压缩。
   emitCompactionHook(hookCtx, {
     name: 'PreCompact',
     trigger: 'reactive',
@@ -290,7 +260,6 @@ export async function handleContextTooLong(
     tokenEstimate: estimateTokenCount(state.messages),
   })
 
-  // 告诉 UI：正在总结对话；响应式路径直接走 LLM 摘要，不再尝试轻量路径。
   callbacks.onCompressionProgress?.('Summarizing conversation...')
 
   // 记录压缩前 token 估算，稍后用于展示。
@@ -314,16 +283,11 @@ export async function handleContextTooLong(
   // 这里不带 summary，因为响应式路径没有先跑 generateSessionSummary。
   void markBoundaryAndReflush(state)
 
-  // UI 展示用的压缩前 k token。
   const beforeK = Math.round(tokensBefore / 1000)
-
-  // UI 展示用的压缩后 k token。
   const afterK = Math.round(tokensAfter / 1000)
 
-  // 告诉 UI：上下文太长问题已经通过压缩处理，外层马上重试本轮。
   callbacks.onContextCompressed(`Context too long — compressed (~${beforeK}k → ~${afterK}k tokens). Retrying...`)
 
-  // 通知插件：响应式压缩完成；summary 为空表示没有独立结构化摘要。
   emitCompactionHook(hookCtx, {
     name: 'PostCompact',
     trigger: 'reactive',
@@ -331,7 +295,6 @@ export async function handleContextTooLong(
     summary: '',
   })
 
-  // true 表示“我已经处理过上下文太长了，调用方应该重试刚才失败的请求”。
   return true
 }
 
@@ -347,27 +310,16 @@ function emitCompactionHook(
     | { name: 'PreCompact'; trigger: 'proactive' | 'reactive'; messageCount: number; tokenEstimate: number }
     | { name: 'PostCompact'; trigger: 'proactive' | 'reactive'; messageCount: number; summary: string },
 ): void {
-  // 如果没有 hookBus，或者当前事件名没有任何插件订阅，就直接返回。
-  // 这一步避免每次压缩都构造无意义的 Promise。
   if (!ctx?.hookBus?.has(partial.name)) return
 
-  // `void` 表示故意不 await：压缩主流程不等插件跑完。
-  // hook 是通知/审计用途，不应该阻塞或改变压缩本身。
   void ctx.hookBus
     .emit(
       {
-        // 把 PreCompact/PostCompact 自己的数据摊进事件对象。
         ...partial,
-
-        // 补上 HookEvent 要求的 session 信息：当前项目 cwd 和模型 id。
         session: { cwd: ctx.cwd, modelId: ctx.modelId },
       },
-
-      // 把 abortSignal 交给 hook executor；用户中断时 hook 有机会一起停。
       { signal: ctx.abortSignal },
     )
-
-    // hook 失败不能让 agent loop 崩掉；这里只写 debug 日志。
     .catch((err) => {})
 }
 

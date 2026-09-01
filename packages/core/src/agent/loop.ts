@@ -570,9 +570,6 @@ export async function agentLoop(
   let completedNormally = false // 这个表示这次 agent loop 最后是不是“正常完成”
   // 为什么需要它？因为后面有“记忆提取器”。只有当本轮对话正常结束时，才应该从对话中提取长期记忆。
 
-  // 如果没有 `maxTurns`，就一直跑到模型 stop 或用户中断为止。
-  // 这是交互模式的默认行为，Codex 的主循环本身也没有上限。
-  // `--print` 和子 Agent 会传一个值。
   while (options.maxTurns === undefined || turn < options.maxTurns) {
     turn++
 
@@ -666,7 +663,7 @@ export async function agentLoop(
       continuationAttempts = 0
       let toolCalls: Awaited<StreamResult['toolCalls']>
       try {
-        toolCalls = await outcome.result.toolCalls // 然后代码拿到这些工具调用
+        toolCalls = await outcome.result.toolCalls
       } catch (err) {
         if (isAbortError(err, options.abortSignal)) break
         callbacks.onError(new Error(classifyApiError(err).message))
@@ -732,11 +729,6 @@ export async function agentLoop(
     callbacks.onError(new Error(`Reached maximum turns (${options.maxTurns}). Stopping agent loop.`))
   }
 
-  // 最后一把刷盘，负责兜住通过 'stop' / 'error' 退出时的末尾内容。
-  // 这种情况下，循环顶部那次“下一轮 flush”不会再执行。
-  // Abort 路径不在这里处理：useAgent.abort() 会在 agentLoop 返回后
-  // 自己补上 `[Request interrupted by user]`，所以它也要负责自己的 flush，
-  // 见 use-agent.ts。
   void flushPendingMessages(state)
 
   // 轮后记忆提取器：只会在干净的 `stop` 结束时运行，

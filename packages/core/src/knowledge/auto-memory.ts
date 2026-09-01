@@ -25,7 +25,6 @@ const VALID_CATEGORIES: ReadonlySet<KnowledgeCategory> = new Set(['user', 'feedb
 
 // 运行时类型守卫：把普通字符串判断成合法的 KnowledgeCategory。
 function isValidCategory(c: string): c is KnowledgeCategory {
-  // Set.has 只会返回 boolean；这里用 as KnowledgeCategory 是为了让 TypeScript 接受类型收窄。
   return VALID_CATEGORIES.has(c as KnowledgeCategory)
 }
 
@@ -51,22 +50,17 @@ class AutoMemory {
   /** 串行保存队列，用来避免多个 add/delete 同时写同一个文件。 */
   private saveQueue: Promise<void> = Promise.resolve()
 
-  // 构造时只绑定文件路径；真正读磁盘发生在 load()，这样创建实例本身很轻。
+  // 构造时只绑定文件路径；真正读磁盘发生在 load()
   constructor(filePath: string) {
-    // 把传入路径存下来，后续 load/save 都会用同一个路径。
     this.filePath = filePath
   }
 
   /** 从 markdown 文件加载记忆。文件不存在、格式异常或读取失败时，降级为空记忆。 */
   async load(): Promise<void> {
     try {
-      // 尝试读取整个 auto.md；文件格式很小，所以一次性读完比流式读取更简单。
       const content = await fs.readFile(this.filePath, 'utf-8')
-
-      // 把 markdown 文本解析成结构化数组，后续查找、更新、删除都基于这个数组。
       this.facts = parseMemoryFile(content)
     } catch {
-      // 自动记忆是可选增强：文件不存在、权限问题、解析前读取失败，都不应该阻塞 agent 启动。
       this.facts = []
     }
   }
@@ -77,8 +71,6 @@ class AutoMemory {
   add(newFact: KnowledgeFact): void {
     // 首先校验分类，避免非法分类进入内存并在下一次保存时落盘。
     if (!isValidCategory(newFact.category)) {
-      // 纵深防御：工具 schema 理论上应该已经拦住非法分类；
-      // 如果有调用方绕过 schema，宁可丢弃这次写入，也不要把脏数据写进文件。
       return
     }
 
@@ -104,11 +96,9 @@ class AutoMemory {
     if (conflictIndex >= 0) {
       this.facts[conflictIndex] = fact
     } else {
-      // 没有冲突时，把它作为一条新记忆追加到数组末尾。
       this.facts.push(fact)
     }
 
-    // 内存已变更，异步排队写回磁盘；这里不 await，是为了不阻塞调用方主流程。
     this.enqueueSave()
   }
 
@@ -123,7 +113,6 @@ class AutoMemory {
 
   /** 按 key 查找记忆；传入 category 时只在该分类中查找。 */
   find(key: string, category?: string): KnowledgeFact | undefined {
-    // find 返回第一条匹配的事实；如果没有匹配项，TypeScript 类型里会体现为 undefined。
     return this.facts.find((f) => f.key === key && (!category || f.category === category))
   }
 
@@ -133,7 +122,6 @@ class AutoMemory {
     // cutoff 是“最早允许保留的时间戳”；比它更早的记忆会被淘汰。
     const cutoff = Date.now() - maxAgeDays * 86400_000
 
-    // 记录过滤前数量，用来判断是否真的发生了删除。
     const before = this.facts.length
 
     // KnowledgeFact.date 是 YYYY-MM-DD 字符串；转成时间戳后和 cutoff 比较。
@@ -145,20 +133,16 @@ class AutoMemory {
 
   /** 获取当前内存中的所有记忆。返回浅拷贝，避免外部直接修改内部数组。 */
   getAll(): KnowledgeFact[] {
-    // 用展开语法复制数组本身；外部 push/splice 不会影响 this.facts。
     return [...this.facts]
   }
 
   /** 获取可注入 system prompt 的 markdown 内容。
    *  只保留前 MAX_LOAD_LINES 行，防止自动记忆文件过大时挤占过多上下文窗口。 */
   getPromptContent(): string {
-    // 先复用 serialize() 得到和文件保存一致的 markdown 表示。
     const content = this.serialize()
 
-    // 按行切开，后面才能做行数截断。
     const lines = content.split('\n')
 
-    // 如果超过最大行数，只取前面部分，并明确告诉模型这段内容被截断过。
     if (lines.length > MAX_LOAD_LINES) {
       return lines.slice(0, MAX_LOAD_LINES).join('\n') + '\n... (truncated)'
     }
@@ -170,43 +154,31 @@ class AutoMemory {
   /** 序列化成 markdown 格式。
    *  先按 category 分组，再输出为二级标题 + 三级分类标题 + 列表项，便于人类查看和编辑。 */
   private serialize(): string {
-    // 没有任何记忆时返回空字符串；调用方会据此跳过 prompt section。
     if (this.facts.length === 0) return ''
 
-    // Map 用来按 category 聚合事实，保持输出结构清晰。
     const categories = new Map<string, KnowledgeFact[]>()
 
-    // 遍历当前所有事实，把它们放入对应分类的数组里。
     for (const fact of this.facts) {
-      // 如果这个分类已经有数组就复用；否则先创建一个空数组。
       const list = categories.get(fact.category) ?? []
-
-      // 把当前事实加入该分类。
       list.push(fact)
 
-      // 写回 Map；新建数组时需要这一步，复用数组时这一步也保持逻辑一致。
       categories.set(fact.category, list)
     }
 
     // markdown 输出从固定标题开始，空字符串表示标题后留一行空行。
     const sections: string[] = ['## Auto Memory', '']
 
-    // 按 Map 的插入顺序输出每个分类。
     for (const [category, facts] of categories) {
       // 分类标题，例如 `### user`、`### project`。
       sections.push(`### ${category}`)
 
-      // 输出该分类下的每条事实。
       for (const f of facts) {
         // 单条事实格式固定为 `- [日期] key: fact`，parseMemoryFile 会依赖这个格式读回来。
         sections.push(`- [${f.date}] ${f.key}: ${f.fact}`)
       }
-
-      // 每个分类后空一行，让 markdown 更好读。
       sections.push('')
     }
 
-    // 用换行把所有 markdown 行拼成最终文本。
     return sections.join('\n')
   }
 
@@ -222,13 +194,11 @@ class AutoMemory {
   /** 把当前内存中的记忆写回文件。写入失败时静默忽略，不能因为记忆失败导致 agent 崩溃。 */
   private async save(): Promise<void> {
     try {
-      // 确保 memory 目录存在；recursive 让多级目录不存在时也能一次性创建。
       await fs.mkdir(path.dirname(this.filePath), { recursive: true })
 
-      // 把当前 facts 序列化后的 markdown 写入 auto.md，覆盖旧内容。
       await fs.writeFile(this.filePath, this.serialize(), 'utf-8')
     } catch {
-      // 静默失败：自动记忆是增强功能，写失败不应该中断 agent 主流程。
+
     }
   }
 }
@@ -240,7 +210,6 @@ class AutoMemory {
  * 不会继续被重新序列化进新文件。
  */
 function parseMemoryFile(content: string): KnowledgeFact[] {
-  // 解析结果会逐条 push 到 facts，最后返回给 AutoMemory.load()。
   const facts: KnowledgeFact[] = []
 
   // 当前正在解析哪个 `### category` 小节；只有合法分类下的列表项才会被接受。
@@ -253,10 +222,7 @@ function parseMemoryFile(content: string): KnowledgeFact[] {
 
     // 如果这一行是分类标题，就更新 currentCategory，并跳过本行剩余解析。
     if (categoryMatch) {
-      // trim 去掉标题前后多余空格，让 `### user ` 也能正常识别。
       currentCategory = categoryMatch[1]?.trim() ?? ''
-
-      // 分类标题不是事实本身，所以继续读下一行。
       continue
     }
 
@@ -282,16 +248,13 @@ function parseMemoryFile(content: string): KnowledgeFact[] {
     }
   }
 
-  // 返回解析出的所有合法事实；非法分类和不符合格式的行都会被忽略。
   return facts
 }
 
-// 单例实例
-//
+
 // 项目级 memory 按 cwd 对应的文件路径缓存。这样如果进程在运行中切换工作目录
 // （例如被嵌入 daemon 或测试框架），就会拿到绑定到新项目文件的实例，而不是误用
 // 旧 cwd 的 stale 实例。用户级 memory 是真正的单例，因为它的路径固定来自 USER_XCODE_DIR。
-
 const projectMemories = new Map<string, AutoMemory>()
 
 // 用户级记忆路径固定，所以整个进程只需要一个实例；第一次访问时懒创建。
@@ -303,44 +266,31 @@ function projectMemoryPath(cwd: string): string {
   return path.join(cwd, TEGENT_DIR, 'memory', 'auto.md')
 }
 
-// 获取指定作用域的 AutoMemory 实例；调用方不需要关心文件路径和缓存细节。
 export function getAutoMemory(scope: 'project' | 'user'): AutoMemory {
-  // 项目级记忆跟 cwd 绑定，所以同一个进程可能缓存多个项目路径对应的实例。
   if (scope === 'project') {
-    // 每次调用都用最新的 process.cwd() 算路径，支持测试或嵌入场景中切换 cwd。
     const filePath = projectMemoryPath(process.cwd())
-
-    // 先看看这个项目路径是否已经创建过 AutoMemory。
     let mem = projectMemories.get(filePath)
 
-    // 没创建过就新建一个，并放入 Map，后续同路径复用。
     if (!mem) {
       mem = new AutoMemory(filePath)
       projectMemories.set(filePath, mem)
     }
 
-    // 返回绑定到当前项目路径的记忆实例。
     return mem
   }
 
-  // 用户级记忆路径固定，第一次访问时才创建。
   if (!userMemory) {
     userMemory = new AutoMemory(path.join(USER_TEGENT_DIR, 'memory', 'auto.md'))
   }
 
-  // 返回全局用户级记忆实例。
   return userMemory
 }
 
 /** 初始化记忆：从磁盘加载用户级和项目级记忆，并清理过期条目。 */
 export async function initMemories(): Promise<void> {
-  // 取当前项目对应的项目级记忆实例。
   const project = getAutoMemory('project')
-
-  // 取用户级记忆实例。
   const user = getAutoMemory('user')
 
-  // 并行从磁盘加载两份记忆；它们路径不同，没有必要串行等待。
   await Promise.all([project.load(), user.load()])
 
   // 加载后清理项目级过期记忆，默认保留 90 天。
@@ -350,5 +300,4 @@ export async function initMemories(): Promise<void> {
   user.evict(90)
 }
 
-// 导出类本身，方便测试或高级调用方创建自定义路径的 AutoMemory。
 export { AutoMemory }

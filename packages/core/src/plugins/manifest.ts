@@ -1,12 +1,3 @@
-// 这个模块只做一件事：给定磁盘上的插件根目录，按优先级查找 manifest，
-// 解析并校验 JSON，最后返回标准化后的 `PluginManifest`。贡献路径解析、
-// 作用域判断和启用状态判断都交给调用方处理。
-//
-// manifest 里未知的顶层字段会被静默剥离，这是 zod `z.object` 的默认行为，
-// 也是这里刻意保留的兼容策略：较新的 Claude Code manifest 可能含有我们还
-// 不理解的字段，例如 `output-styles`、`lspServers`。我们允许它们解析通过，
-// 只是不会对未知能力做任何动作。后续 `/plugin doctor` 可以把“已加载但部分
-// 能力不受支持”的信息展示给用户。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -15,7 +6,6 @@ import { z } from 'zod'
 import { GEMINI_MANIFEST_REL, MANIFEST_CANDIDATES } from './paths.js'
 import type { ManifestFormat, PluginManifest } from './types.js'
 
-// ── Zod schema 定义 ────────────────────────────────────────────────────
 
 const authorSchema = z.union([
   z.string(),
@@ -59,10 +49,6 @@ const manifestSchema = z.object({
     .string()
     .min(1)
     .regex(NAME_RE, 'name must be lowercase letters, digits, and dashes only (e.g. "linear-issues")'),
-  // 真实 Claude Code 插件里的 version 可以缺失。这个行为已对照
-  // anthropics/claude-plugins-official 验证过，很多插件都不带版本号，
-  // 包括 amplitude 这类重要第三方插件。我们默认填成 "0.0.0"，
-  // 让缓存路径和 installed_plugins.json 账本始终有可用字符串。
   version: z.string().min(1).optional(),
   description: z.string().optional(),
   author: authorSchema.optional(),
@@ -81,7 +67,6 @@ const manifestSchema = z.object({
   engines: z.object({ 'tegent': z.string().optional() }).optional(),
 })
 
-// ── manifest 发现 ─────────────────────────────────────────────────────
 
 export interface ManifestDiscovery {
   /** 实际命中的 manifest 文件绝对路径。 */
@@ -113,7 +98,6 @@ export async function discoverManifest(rootDir: string): Promise<ManifestDiscove
   return null
 }
 
-// ── manifest 解析 ─────────────────────────────────────────────────────
 
 export class ManifestParseError extends Error {
   constructor(
@@ -169,13 +153,10 @@ export async function parseManifest(manifestPath: string): Promise<PluginManifes
     ...data,
     schemaVersion: data.schemaVersion ?? '1',
     version: data.version ?? '0.0.0',
-    // 统一 author 联合类型：内部调用方只处理对象形式。
-    // 字符串作者会被转换为 `{ name: <string> }`。
     author: typeof data.author === 'string' ? { name: data.author } : data.author,
   }
 }
 
-// ── 辅助函数 ───────────────────────────────────────────────────────────
 
 /**
  * 判断指定路径是否存在且当前进程可访问。

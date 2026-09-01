@@ -107,8 +107,6 @@ export async function buildPluginIntegration(
   load: LoadResult,
   opts: BuildPluginIntegrationOptions = {},
 ): Promise<PluginIntegrationOutput> {
-  // Hook registry 最后构建，因为遍历插件时要先收集每个插件自己的 hook config。
-  // 所有 rootDir 都来自 LoadedPlugin，只有遍历时才完整可得。
   const hookInputs: Array<{ pluginId: string; pluginDir: string; config: HookConfig }> = []
 
   const out: PluginIntegrationOutput = {
@@ -313,7 +311,6 @@ async function resolvePluginMcpServers(
   }
 
   // stdio 命令里的插件变量在这里展开；schema 校验先于展开，保证结构错误
-  // 仍然由 MCP config-schema 报告，而不是变成展开后的奇怪字符串。
   const vars = buildVariableContext({ pluginDir: plugin.rootDir, cwd, pluginId: plugin.id })
   const expanded = expandMcpServerVariables(servers, vars)
 
@@ -358,6 +355,5 @@ export async function getPluginMcpServersFromDisk(cwd: string): Promise<Record<s
   }
 }
 
-// 重新导出常用类型和函数，让典型 CLI 启动接线只需要从这个模块 import。
 export type { LoadResult, ResolvedContributions } from './loader.js'
 export { loadAllPlugins }

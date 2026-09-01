@@ -133,12 +133,9 @@ export function getMaxOutputTokens(modelId: string): number {
  * 这里只统计字符串 content 和 part.text；图片/文件这类二进制内容会在其它层处理或降级。
  */
 export function estimateTokenCount(messages: ModelMessage[]): number {
-  // 先累加所有可见文本字符数，再用 CHARS_PER_TOKEN_ESTIMATE 换算成 token。
   let chars = 0
 
-  // 遍历对话里的每条消息。
   for (const msg of messages) {
-    // 最简单的消息 content 是字符串，直接累加字符串长度。
     if (typeof msg.content === 'string') {
       chars += msg.content.length
     } else if (Array.isArray(msg.content)) {

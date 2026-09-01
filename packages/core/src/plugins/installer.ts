@@ -95,11 +95,6 @@ export interface InstallResult {
   record: InstalledPluginRecord
 }
 
-/**
- * 安装失败时抛出的领域错误。
- *
- * 调用方可以用它和底层 I/O、JSON、git 错误区分开，展示更友好的插件安装消息。
- */
 export class InstallError extends Error {
   constructor(message: string) {
     super(message)
@@ -111,17 +106,16 @@ export class InstallError extends Error {
  * 安装一个插件。
  *
  * 函数会执行来源获取、manifest 发现和解析、策略检查、授权预览、userConfig 收集、
- * 缓存提交以及 installed_plugins.json 账本更新。中途失败时会尽力清理临时目录。
+ * 缓存提交，并把安装记录写入 installed_plugins.json。中途失败时会尽力清理临时目录。
  *
  * @param req 安装请求，包含来源、marketplace、作用域、可选授权回调和取消信号。
- * @returns 安装完成后的 plugin id、根目录、manifest、manifest 格式和账本记录。
+ * @returns 安装完成后的 plugin id、根目录、manifest、manifest 格式和写入的安装记录。
  * @throws InstallError 安装策略、来源获取、manifest、授权或缓存提交失败时抛出。
  */
 export async function installPlugin(req: InstallRequest): Promise<InstallResult> {
-  // ── 安装前策略检查（便宜，尽早失败） ──
-  // `strictKnownMarketplaces` 和 `blockedPlugins` 来自
-  // ~/.tegent/plugins/known_marketplaces.json。管理员（通常是企业场景）开启严格模式后，
-  // 所有安装都必须来自已订阅 marketplace；直接 git / github / local 安装会被拒绝。
+  // ── 安装前策略检查 ──
+  // `strictKnownMarketplaces` 和 `blockedPlugins` 来自~/.tegent/plugins/known_marketplaces.json。
+  // 开启严格模式后， 所有安装都必须来自已订阅 marketplace；直接 git / github / local 安装会被拒绝。
   // `blockedPlugins` 要等 manifest 解析后检查，因为需要规范 plugin id。
   const km = await readKnownMarketplaces()
   if (km.strictKnownMarketplaces) {
@@ -162,13 +156,7 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
       throw new InstallError(`manifest name "${manifest.name}" does not match expected "${req.expectedName}"`)
     }
 
-    // 此时已经知道规范 plugin id，可以执行第二个策略检查：
-    // known_marketplaces.json 中的 blockedPlugins。这是偏管理员的强制禁用列表；
-    // 命中的插件无论 marketplace 或 consent 如何，安装都会被拒绝。
-    // 支持两种匹配形式：
-    //   - 完整 id `name@marketplace`：精确阻止某个 marketplace 版本，不影响 fork
-    //   - 裸 name `name`：广泛阻止所有 marketplace 中的同名插件，符合一些管理员对
-    //     npm `--ignore` 风格的预期
+
     const earlyId = `${manifest.name}@${req.marketplace}`
     const blocked = km.blockedPlugins?.find((b) => b === earlyId || b === manifest.name)
     if (blocked) {
@@ -178,7 +166,6 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
       )
     }
 
-    // ── 授权门禁 ──
     // 授权预览基于已解析 manifest 构建，调用方可以展示插件将贡献的内容
     // （hooks、mcp、作用域等），并显式询问用户。callback 缺失时跳过提示是有意为之：
     if (req.consent) { // 目前 cli 中均未传值，即都不需要确认
@@ -236,17 +223,11 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
 
     return { pluginId, rootDir: finalDir, manifest, manifestFormat: discovery.format, record }
   } catch (err) {
-    // 安装中途失败时尽力清理临时目录。moveOrCopy 成功路径会把 temp rename 走，
-    // 所以这里主要处理移动前发生错误的情况。
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {
-      /* 清理失败时没有更有用的恢复动作，保留原始安装错误即可。 */
-    })
     if (err instanceof InstallError || err instanceof ManifestParseError) throw err
     throw new InstallError(err instanceof Error ? err.message : String(err))
   }
 }
 
-// ── 来源 → 临时目录 ───────────────────────────────────────────────────
 
 /**
  * 把插件来源获取到一个新的临时目录。
@@ -268,10 +249,6 @@ async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<
     const stat = await fs.stat(resolved).catch(() => null) // fs.stat 获取文件的详细信息
     if (!stat || !stat.isDirectory()) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
-      // 错误中展示 cwd：相对路径会基于 process.cwd() 解析；当 tegent 通过 `pnpm dev`
-      // 启动时 cwd 可能是 `packages/cli/` 而不是仓库根目录。用户在 slash command
-      // 中输入 `./foo` 时容易被这个差异困住，同时展示解析后的绝对路径和 cwd
-      // 能让原因更明显。
       const isRelative = !path.isAbsolute(source.path)
       const cwdHint = isRelative ? ` (resolved relative to cwd: ${process.cwd()})` : ''
       throw new InstallError(`local source is not a directory: ${resolved}${cwdHint}`)
@@ -287,7 +264,6 @@ async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<
     // subdir 安装仍然先浅 clone 整个 repo。真正的 sparse-checkout 在巨大 monorepo
     // 上会更快，但 `--depth 1 --filter=blob:none --sparse` 组合在不同 git 版本中
     // 比较脆弱；即使是大型 monorepo，depth-1 clone 通常也小于 100 MB。
-    // 如果未来成为痛点再重新评估。
     args.push(cloneUrl, tempDir)
 
     try {
@@ -306,9 +282,8 @@ async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<
     // 做前缀校验。这与 `git checkout <short-sha>` 的容忍度一致，也符合真实
     // marketplace 的产出方式（anthropics/claude-plugins-official 有时发布 7 位 sha）。
     //
-    // 为什么硬失败而不是警告：sha mismatch 按定义要么是 marketplace.json 配错
-    // （作者 bug），要么是真实供应链异常。无论哪种情况，用户都不应该把未经审核的
-    // 代码落到磁盘上。大声报错并指向 marketplace 作者，胜过静默安装当前 HEAD。
+    // 为什么硬失败而不是警告：sha mismatch 按定义要么是 marketplace.json 配错,
+    // 要么是真实供应链异常。无论哪种情况，用户都不应该把未经审核的代码落到磁盘上
     if (source.expectedSha) {
       try {
         const result = await execa('git', ['rev-parse', 'HEAD'], { cwd: tempDir, stdio: 'pipe', signal })
@@ -325,8 +300,6 @@ async function fetchToTemp(source: PluginSource, signal?: AbortSignal): Promise<
         }
       } catch (err) {
         if (err instanceof InstallError) throw err
-        // rev-parse 失败在新 clone 中理论上不该发生；这里按完整性失败处理，
-        // 避免静默安装未经检查的代码。
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
         throw new InstallError(
           `failed to verify sha for ${cloneUrl}: ${err instanceof Error ? err.message : String(err)}`,
@@ -386,8 +359,6 @@ const COPY_SKIP = new Set(['.git', 'node_modules', '.DS_Store', 'Thumbs.db'])
  * @param root 初始源目录，递归调用内部使用。
  */
 async function copyDirFiltered(src: string, dst: string, signal?: AbortSignal, root?: string): Promise<void> {
-  // `root` 在第一次非递归调用时捕获。下面的 symlink 逃逸检查必须基于原始插件源目录，
-  // 而不是当前递归层的 `src`，因为 `src` 会随着进入子目录不断变化。
   const rootDir = root ?? src
   await fs.mkdir(dst, { recursive: true })
   const entries = await fs.readdir(src, { withFileTypes: true })
@@ -401,12 +372,6 @@ async function copyDirFiltered(src: string, dst: string, signal?: AbortSignal, r
     } else if (entry.isFile()) {
       await fs.copyFile(s, d)
     } else if (entry.isSymbolicLink()) {
-      // symlink 目标相对其所在目录解析。如果解析后的目标逃出插件源根目录，
-      // 就丢弃该 symlink 而不是保留它：在 POSIX 上，插件树里的
-      // `evil -> /etc/passwd` 会把主机文件指针放进缓存，loader / hooks 运行时可能
-      // 解引用它；在 Windows 上，下面的 fallback 甚至可能把 `/etc/passwd` 等价文件
-      // 直接复制进缓存。这里不跟随 symlink 校验目标是否存在，因为“损坏但仍在边界内”
-      // 的 symlink 依然可以安全保留。
       const target = await fs.readlink(s)
       const resolved = path.resolve(path.dirname(s), target)
       const rel = path.relative(rootDir, resolved)
@@ -416,8 +381,6 @@ async function copyDirFiltered(src: string, dst: string, signal?: AbortSignal, r
       try {
         await fs.symlink(target, d)
       } catch {
-        // Windows 没有 symlink 权限时，fallback 为复制解析后的文件。
-        // 这是 best-effort；损坏 symlink 会被直接丢弃。
         await fs.copyFile(s, d).catch(() => {})
       }
     }
@@ -447,14 +410,14 @@ async function moveOrCopy(src: string, dst: string, signal?: AbortSignal): Promi
   await fs.rm(src, { recursive: true, force: true }).catch(() => {})
 }
 
-// ── installed_plugins.json 账本维护 ───────────────────────────────────
 
 /**
- * 读取已安装插件账本。
+ * 读取 installed_plugins.json 中已安装插件的记录。
  *
- * 文件不存在、JSON 损坏或结构不符合预期时返回空账本，避免坏账本阻塞启动或安装。
+ * 文件不存在、JSON 损坏或结构不符合预期时返回空列表，避免损坏的记录文件阻塞
+ * 启动或安装。
  *
- * @returns 已安装插件账本快照。
+ * @returns installed_plugins.json 的当前内容。
  */
 async function readInstalledPlugins(): Promise<InstalledPlugins> {
   const file = installedPluginsPath()
@@ -471,9 +434,9 @@ async function readInstalledPlugins(): Promise<InstalledPlugins> {
 }
 
 /**
- * 写入已安装插件账本。
+ * 把安装记录写回 installed_plugins.json。
  *
- * @param data 要写入的完整账本数据。
+ * @param data 要完整写入的记录数据（整个文件内容会被它替换）。
  */
 async function writeInstalledPlugins(data: InstalledPlugins): Promise<void> {
   const file = installedPluginsPath()
@@ -517,7 +480,6 @@ export async function findInstalledPlugin(id: string): Promise<InstalledPluginRe
   return data.plugins.find((p) => p.id === id)
 }
 
-// ── 卸载 ───────────────────────────────────────────────────────────────
 
 export interface UninstallResult {
   /** 从缓存中删除的版本列表；插件没有缓存时为空数组。 */
@@ -529,12 +491,12 @@ export interface UninstallResult {
 /**
  * 卸载一个插件。
  *
- * 函数会删除该插件的所有缓存版本，并移除 installed_plugins.json 中的账本记录。
+ * 函数会删除该插件的所有缓存版本，并移除 installed_plugins.json 中的安装记录。
  * 它不会删除数据目录（`~/.tegent/plugins/data/<id>/`），这样用户后续重装时不会
  * 丢失插件状态。
  *
  * @param id 形如 `name@marketplace` 的插件 ID。
- * @returns 删除的缓存版本和账本删除状态。
+ * @returns 删除的缓存版本，以及安装记录是否已从 installed_plugins.json 移除。
  */
 export async function uninstallPlugin(id: string): Promise<UninstallResult> {
   const record = await findInstalledPlugin(id)

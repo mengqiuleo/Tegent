@@ -8,7 +8,6 @@
 // `.tegent-plugin/plugin.json`（新写 tegent-only 插件时推荐），并兼容根目录下
 // 裸露的 `plugin.json`。
 
-// ── 插件来源（安装时从哪里获取） ───────────────────────────────────────
 
 /**
  * 插件安装来源的内部标准形状。
@@ -44,7 +43,6 @@ export type PluginSource =
  */
 export type PluginScope = 'user' | 'project'
 
-// ── Manifest（插件作者编写的契约） ────────────────────────────────────
 
 export interface PluginAuthor {
   name?: string
@@ -108,7 +106,6 @@ export interface PluginManifest {
   homepage?: string
   license?: string
 
-  // ── 贡献项（全部可选，全部相对插件根目录解析） ───────────────────────
   /**
    * skills 目录路径。
    *
@@ -144,7 +141,6 @@ export interface PluginManifest {
   engines?: { 'tegent'?: string }
 }
 
-// ── 已加载插件（运行时注册表保存的形状） ───────────────────────────────
 
 /**
  * 实际加载到的 manifest 格式。
@@ -281,7 +277,7 @@ export interface KnownMarketplaces {
 // ── 已安装插件注册表（~/.tegent/plugins/installed_plugins.json） ───────
 
 /**
- * 已安装插件账本中的单条记录。
+ * 已安装插件 installed_plugins.json 中的单条记录。
  *
  * 这里保存每个缓存安装的关键 metadata，让更新、卸载和作用域变更可以不用重新读取
  * 每个 manifest。

@@ -51,24 +51,18 @@ function evaluateShellPermission(command: string): PermissionLevel {
  * 同一条命令多次出现时，不需要重复跑拆分和规则匹配。
  */
 function resolveShellPermission(input: PermissionInput): PermissionLevel {
-  // shell 工具的参数里 command 才是真正的命令字符串。
   const cmd = (input.command as string) ?? ''
 
-  // 缓存命中就直接返回。
   const cached = shellPermissionCache.get(cmd)
   if (cached) return cached
 
-  // 缓存没命中，现场计算一次。
   const level = evaluateShellPermission(cmd)
 
-  // 达到容量上限时，删除最早插入的那条记录。
   if (shellPermissionCache.size >= SHELL_PERMISSION_CACHE_MAX) {
-    // Map 会保留插入顺序，所以 keys().next().value 就是最老的 key。
     const oldest = shellPermissionCache.keys().next().value
     if (oldest !== undefined) shellPermissionCache.delete(oldest)
   }
 
-  // 写入缓存，供下一次同命令复用。
   shellPermissionCache.set(cmd, level)
   return level
 }
@@ -102,7 +96,6 @@ const rules: Record<string, (input: PermissionInput) => PermissionLevel> = {
  * 未知工具保守处理，默认 ask。
  */
 export function getPermissionLevel(toolName: string, input: PermissionInput): PermissionLevel {
-  // 先查工具名对应的规则函数。
   const rule = rules[toolName]
 
   // 没配置规则的工具默认询问用户。
@@ -136,7 +129,6 @@ const SENSITIVE_PATH_PATTERNS = [
  * 反斜杠和尾部分隔符导致误判。
  */
 export function isPathWithinProject(filePath: string, projectDir: string): boolean {
-  // 把路径规整成适合字符串比较的形式。
   const normalize = (p: string) => path.resolve(p).replace(/\\/g, '/').toLowerCase()
 
   // file 是目标文件绝对路径。
@@ -153,7 +145,6 @@ export function isPathWithinProject(filePath: string, projectDir: string): boole
  * 判断路径是否命中敏感路径规则。
  */
 function isSensitivePath(filePath: string): boolean {
-  // 任意一个正则匹配就算敏感。
   return SENSITIVE_PATH_PATTERNS.some((re) => re.test(filePath))
 }
 
@@ -178,7 +169,6 @@ export async function checkPermission(
   permissionMode: PermissionMode = 'default',
   cwd?: string,
 ): Promise<boolean> {
-  // 先得到工具的默认权限等级。
   const level = getPermissionLevel(toolCall.toolName, toolCall.input)
 
   // 只读工具或全局信任模式直接放行。
@@ -186,23 +176,18 @@ export async function checkPermission(
 
   // acceptEdits 只特殊处理 writeFile/edit。
   if (permissionMode === 'acceptEdits' && (toolCall.toolName === 'writeFile' || toolCall.toolName === 'edit')) {
-    // 从工具参数里取目标文件路径。
     const filePath = (toolCall.input.filePath as string) ?? ''
 
-    // 没传 cwd 时使用当前进程目录作为项目目录。
     const projectDir = cwd ?? process.cwd()
 
-    // 目标路径必须在项目内，且不能命中敏感路径，才自动放行。
     if (filePath && isPathWithinProject(filePath, projectDir) && !isSensitivePath(filePath)) {
       return true
     }
-    // 项目外路径或敏感文件不自动放行，继续走下面的询问流程。
   }
 
   // 用户本会话里点过 always 的规则，如果匹配也直接放行。
   if (sessionRulesMatch(toolCall.toolName, toolCall.input)) return true
 
-  // 走到这里说明必须问用户。
   const decision = await onAskPermission(toolCall)
 
   // always 表示本次允许，并且保存一条后续可复用的 allow rule。
@@ -226,7 +211,6 @@ export async function checkPermission(
   return decision === 'yes'
 }
 
-// 对外重新导出权限规则相关工具，供 CLI 或测试直接使用。
 export { addSessionAllowRule, clearSessionRules, buildAllowRule } from './session-store.js'
 export {
   extractCommandPrefix,

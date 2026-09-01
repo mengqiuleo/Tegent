@@ -8,13 +8,6 @@
 //      字段从磁盘 wire form（字符串快捷写法、`git-subdir`、`url` 等）归一化成内部
 //      `PluginSource`，让 installer 只需要处理一种形状。
 //   4. 根据 `name@marketplace` 插件 ID 查找安装来源。
-//
-// wire format 与内部 `PluginSource` 的差异：真实 Claude Code 规格用 `source`
-// 作为判别字段，值可能是 `'git-subdir'`、`'url'` 等，也支持 monorepo subdir 的
-// 普通字符串快捷写法（`"./plugins/foo"`）。我们会把这些都映射成 `PluginSource`，
-// 让系统其他部分只面对一种形状。转换表见 [[normalizeMarketplaceSource]]。
-//
-// 所有磁盘和网络 I/O 都接收 AbortSignal，让 agent loop 中的 Esc 取消能干净传播。
 import { execa } from 'execa'
 
 import fs from 'node:fs/promises'
@@ -26,7 +19,6 @@ import { z } from 'zod'
 import { knownMarketplacesPath, marketplaceDir, marketplaceIndexPath } from './paths.js'
 import type { KnownMarketplace, KnownMarketplaces, Marketplace, MarketplaceEntry, PluginSource } from './types.js'
 
-// ── 保留 marketplace 名称 ──────────────────────────────────────────────
 
 /**
  * 只有来源匹配规范上游时才允许注册的 marketplace 名称。
@@ -40,12 +32,9 @@ export const RESERVED_MARKETPLACE_NAMES: Readonly<Record<string, string>> = {
   'tegent-official': 'mengqiuleo',
 }
 
-// ── 来源归一化（wire format → 内部 PluginSource） ─────────────────────
 
 /**
  * 把 marketplace `source` 字段从磁盘 wire form 转换为内部 `PluginSource`。
- *
- * 支持真实 Claude Code marketplace 中见过的各种形状：
  *
  * | wire form                                                    | 归一化后的 PluginSource                          |
  * |--------------------------------------------------------------|--------------------------------------------------|
@@ -170,7 +159,6 @@ export function normalizeMarketplaceSource(raw: unknown, ctx: { marketplaceClone
   throw new Error('source must be a string or object')
 }
 
-// ── marketplace.json 的 Zod schema ─────────────────────────────────────
 
 // zod 层只把 `source` 校验成“字符串或对象”；真实形状检查在
 // `normalizeMarketplaceSource` 中完成。这个 union 的判别形式太多：
@@ -186,8 +174,6 @@ const wireEntrySchema = z.object({
   version: z.string().optional(),
   homepage: z.string().optional(),
   keywords: z.array(z.string()).optional(),
-  // 真实 Claude Code 插件条目还可能带顶层 `author`。它目前不是 MarketplaceEntry
-  // 的一部分，但这里接受它，避免因为未知字段拒绝整个条目。
   author: z.unknown().optional(),
 })
 
@@ -268,8 +254,6 @@ export function parseMarketplace(raw: string, sourceLabel: string, ctx: ParseMar
         source,
       })
     } catch (err) {
-      // 单个坏插件条目不应该让整个 marketplace 作废；大多数用户可能只关心目录中的
-      // 其他插件。这里先收集错误，等尝试完所有条目后再统一处理。
       sourceErrors.push(`plugins.${i} (${entry.name}): ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -296,7 +280,6 @@ export function parseMarketplace(raw: string, sourceLabel: string, ctx: ParseMar
   }
 }
 
-// ── known_marketplaces.json：读取 / 写入 ───────────────────────────────
 
 /**
  * 创建一个全新的空订阅状态。
@@ -349,14 +332,13 @@ export async function readKnownMarketplaces(): Promise<KnownMarketplaces> {
 async function writeKnownMarketplaces(km: KnownMarketplaces): Promise<void> {
   const file = knownMarketplacesPath()
   await fs.mkdir(path.dirname(file), { recursive: true })
-  // 使用 read-modify-write，避免未来新增的无关字段被覆盖。
   let existing: Record<string, unknown> = {}
   try {
     const raw = await fs.readFile(file, 'utf-8')
     const parsed = JSON.parse(raw) as unknown
     if (parsed && typeof parsed === 'object') existing = parsed as Record<string, unknown>
   } catch {
-    // 第一次写入时文件可能还不存在。
+
   }
   existing.marketplaces = km.marketplaces
   if (km.strictKnownMarketplaces !== undefined) existing.strictKnownMarketplaces = km.strictKnownMarketplaces
@@ -379,8 +361,6 @@ export async function ensureDefaultMarketplaces(): Promise<void> {
   const haveAnthropic = km.marketplaces.some((m) => m.name === 'anthropic-marketplace')
   if (haveAnthropic) return
 
-  // 通过 addKnownMarketplace 添加，确保保留名称检查会执行，
-  // 并设置 `reservedName: true` 与 `officialSource: 'anthropics'`。
   try {
     await addKnownMarketplace({
       name: 'anthropic-marketplace',
@@ -453,7 +433,6 @@ function sourceMatchesOrg(source: string, expectedOrg: string): boolean {
   return false
 }
 
-// ── 获取 / 刷新 marketplace 索引 ───────────────────────────────────────
 
 export interface FetchOptions {
   signal?: AbortSignal
@@ -579,7 +558,7 @@ async function fetchViaShallowClone(source: string, signal?: AbortSignal): Promi
       try {
         return await fs.readFile(candidate, 'utf-8')
       } catch {
-        // 当前候选不存在或不可读时，继续尝试下一个候选路径。
+
       }
     }
     throw new Error(
@@ -587,7 +566,7 @@ async function fetchViaShallowClone(source: string, signal?: AbortSignal): Promi
     )
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {
-      /* 尽力清理临时目录，失败也不能掩盖主错误。 */
+
     })
   }
 }
@@ -609,7 +588,6 @@ export function resolveCloneUrl(source: string): string {
   return source
 }
 
-// ── 查询辅助函数 ───────────────────────────────────────────────────────
 
 /**
  * 读取所有已缓存的 marketplace 索引。
