@@ -1,11 +1,5 @@
-// slash command 只会给我们一整段原始字符串（也就是 `/mcp <sub>`
-// 后面的部分），这里要把它转换成结构化的 McpServerConfig。
-// 解析器的边界故意很窄：
-//   - 每个子命令一个入口（parseAdd / parseAddJson / parseRemove）
-//   - 返回带标签的 ParseResult，这样 App.tsx 只需要分一次支，
-//     就能拿到可用命令或者一条错误消息
-//
-// 我们支持的引号规则也刻意很小：
+// slash command 只会给我们一整段原始字符串（也就是 `/mcp <sub>` 后面的部分），这里要把它转换成结构化的 McpServerConfig。
+// 我们支持的引号规则：
 //   - 双引号和单引号会保留其中的空白；
 //   - 反斜杠只转义空白、引号字符和反斜杠自身：
 //     `\ ` 表示字面空格，`\"` 表示字面双引号，`\\` 表示字面反斜杠；
@@ -151,8 +145,7 @@ export function parseAdd(rawArg: string): ParseResult<AddCommand> {
     if (t === '--header') {
       const v = tokens[i + 1]
       if (typeof v !== 'string') return err('--header requires a "Key: value" argument')
-      // Header 格式按 "Key: Value"（RFC 7230 风格）解析。
-      // 冒号两边的空白尽量宽松一点，符合用户习惯。
+      // Header 格式按 "Key: Value"解析。
       const colon = v.indexOf(':')
       if (colon <= 0) return err(`--header expects "Key: Value" (got ${v})`)
       headerEntries.push([v.slice(0, colon).trim(), v.slice(colon + 1).trim()])
@@ -356,13 +349,11 @@ export function parseRemove(rawArg: string): ParseResult<RemoveCommand> {
   return ok({ kind: 'remove', name, scope })
 }
 
-// ── Internals ──────────────────────────────────────────────────────────────
 
-/** 构造成功结果。 */
+
 function ok<T extends ParsedCommand>(command: T): ParseResult<T> {
   return { ok: true, command }
 }
-/** 构造失败结果。 */
 function err(message: string): { ok: false; error: string } {
   return { ok: false, error: message }
 }

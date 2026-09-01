@@ -116,7 +116,6 @@ export function projectPluginsDir(cwd: string): string {
   return path.join(cwd, TEGENT_DIR, 'plugins')
 }
 
-// ── 插件根目录中的 manifest 探测顺序 ───────────────────────────────────
 
 /**
  * loader 会按优先级探测这些相对 manifest 路径，第一个命中的路径生效。

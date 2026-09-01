@@ -32,7 +32,6 @@ const PER_TOOL_POLICY: Record<string, TruncateOptions> = {
 }
 
 function policyFor(toolName: string | undefined): TruncateOptions {
-  // 未知工具默认保留头尾，通常比只保留开头更稳。
   if (!toolName) return { direction: 'head-tail' }
   return PER_TOOL_POLICY[toolName] ?? { direction: 'head-tail' }
 }

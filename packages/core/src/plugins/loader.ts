@@ -1,23 +1,3 @@
-// CLI 入口会调用这个一次性编排。加载分两轮：
-//
-//   第 1 轮 —— 从 installed_plugins.json 读取 user-scope 安装记录。每条记录都指向
-//              一个带版本号的缓存目录；记录写的是哪个版本，我们就加载哪个版本。
-//              如果账本记录存在但缓存目录缺失，会收集为 PluginLoadError。
-//
-//   第 2 轮 —— 扫描 <cwd>/.tegent/plugins/<name>/ 下的项目本地插件。
-//              它们不记录在 installed_plugins.json 中，因为它们作为仓库内插件被提交。
-//              这类插件的 marketplace 名统一是 "local"。
-//
-// `installed_plugins.json` 是 user-scope 安装的事实来源。孤立缓存目录（有目录但无
-// 账本记录）会被静默忽略，等用户下次运行 `/plugin uninstall` 时再清理。
-//
-// 单个坏插件（JSON 错误、缺少 manifest、schema 不合法）绝不能中止启动；
-// 错误会进入 `PluginLoadError[]`，后续由 `/plugin doctor` 展示。
-//
-// 返回的 `PluginRegistry` 设计上会在会话内冻结使用，和 MCP / skills 一样遵守
-// CLAUDE.md 中的字节稳定性约束。CLI 启动时调用一次 `loadAllPlugins()`，并把结果
-// 放入 `AgentOptions`。`/plugin refresh` 会通过 `registry.reload(...)` 原地替换
-// 内存状态，并让 `systemPromptCache` 失效。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -116,7 +96,7 @@ export async function loadAllPlugins(opts: LoadOptions): Promise<LoadResult> {
   const installed = await listInstalledPlugins()
   for (const record of installed) {
     const rootDir = pluginCacheDir(record.marketplace, record.name, record.version)
-    await loadOnePlugin({ // 插件加载，
+    await loadOnePlugin({
       rootDir, // 读取的是 cache 目录的路径
       fallbackId: record.id,
       marketplace: record.marketplace,
@@ -135,7 +115,7 @@ export async function loadAllPlugins(opts: LoadOptions): Promise<LoadResult> {
   try {
     projectEntries = await fs.readdir(projectRoot, { withFileTypes: true })
   } catch {
-    /* 没有项目插件目录是最常见路径，直接跳过。 */
+
   }
   for (const entry of projectEntries) {
     if (!entry.isDirectory()) continue
@@ -211,7 +191,7 @@ async function loadOnePlugin(args: LoadOneArgs): Promise<void> {
     }
 
     // 规范 id 永远来自 manifest，而不是缓存目录名。
-    // 对已安装插件来说它通常和账本 id 一致；对项目本地插件来说，它可能和目录名不同，
+    // 对已安装插件来说它通常和安装记录的 id 一致；对项目本地插件来说，它可能和目录名不同，
     // 此时 manifest.name 拥有最高优先级。
     const id = `${manifest.name}@${args.marketplace}`
     const enableResolution = args.enableState.resolve(id)
@@ -263,7 +243,6 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
   const root = plugin.rootDir
   const result: ResolvedContributions = {}
 
-  // skills / agents / commands 都是目录类贡献项。
   if (m.skills) {
     result.skillsDir = path.resolve(root, m.skills)
   } else if (await isDir(path.join(root, 'skills'))) {
@@ -280,7 +259,6 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
     result.commandsDir = path.join(root, 'commands')
   }
 
-  // mcpServers 可以来自 manifest 显式声明（path / inline），也可以来自约定文件。
   if (m.mcpServers !== undefined) {
     if (typeof m.mcpServers === 'string') {
       result.mcpServers = { kind: 'path', path: path.resolve(root, m.mcpServers) }
@@ -288,8 +266,6 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
       result.mcpServers = { kind: 'inline', data: m.mcpServers }
     }
   } else {
-    // Claude Code 约定是在插件根目录放 `.mcp.json`。
-    // 我们也接受无点号的 `mcp.json`，作为务实 fallback；有些作者更喜欢可见文件名。
     for (const conv of ['.mcp.json', 'mcp.json']) {
       const p = path.join(root, conv)
       if (await isFile(p)) {
@@ -299,7 +275,6 @@ export async function resolveContributions(plugin: LoadedPlugin): Promise<Resolv
     }
   }
 
-  // hooks 使用同样模式，约定文件是 `hooks/hooks.json`。
   if (m.hooks !== undefined) {
     if (typeof m.hooks === 'string') {
       result.hooks = { kind: 'path', path: path.resolve(root, m.hooks) }

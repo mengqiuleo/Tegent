@@ -68,6 +68,6 @@ export function inputReducer(state: InputState, action: InputAction): InputState
     case 'RESET':
       return { text: '', cursor: 0 } // 清空输入框，并把光标放回开头。
     default:
-      return state // 理论上不会走到这里；保留兜底以返回当前状态。
+      return state
   }
 }

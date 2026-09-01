@@ -28,8 +28,6 @@ import { isToolErrorString, toolErrorFromUnknown, toolErrorString, toolResultMes
 import { handleEnterPlanMode, handleExitPlanMode, handleTodoWrite } from './plan-tools.js'
 import { runSubAgent } from './sub-agents/runner.js'
 
-// 中文导读：
-// 这个文件是“模型工具调用 -> 实际执行 -> tool_result 写回消息历史”的调度中心。
 // 主路径大致是：
 // 1. processToolCalls 收到本轮模型提出的 toolCalls。
 // 2. 过滤 SDK 已拒绝的 ghost call 和已经自动执行过的工具。
@@ -44,10 +42,8 @@ import { runSubAgent } from './sub-agents/runner.js'
  * 不要把它继续抛到更上层变成真正的错误。
  */
 function isAbortError(err: unknown, signal: AbortSignal | undefined): boolean {
-  // Abort 可能来自 AbortSignal 本身。
   if (signal?.aborted) return true
 
-  // 也可能来自不同平台/库包装出来的 Error。
   if (err instanceof Error) {
     if (err.name === 'AbortError') return true
     if (/aborted|AbortError/i.test(err.message)) return true
@@ -105,14 +101,11 @@ async function executeWriteTool(
     }
     await fs.writeFile(filePath, content, { encoding: 'utf-8', signal })
 
-    // 是否是首次创建，决定最终展示文案。
     const isNew = oldContent === null
 
-    // 计算行数只是为了给模型一个直观反馈，不影响实际写入结果。
     const parts = content.split('\n')
     const lineCount = content.endsWith('\n') ? parts.length - 1 : parts.length
 
-    // 把差异发送给 UI，方便在工具行下面显示彩色 patch。
     const payload = computeEditDiff(filePath, oldContent, content)
     if (payload && callbacks.onFileEdit) callbacks.onFileEdit(toolCallId, payload)
 
@@ -143,11 +136,9 @@ async function executeWriteTool(
         )
     }
 
-    // 真正替换内容。
     const newContent = replaceAll ? content.replaceAll(oldString, newString) : content.replace(oldString, newString)
     await fs.writeFile(filePath, newContent, { encoding: 'utf-8', signal })
 
-    // 同样给 UI 发 diff。
     const payload = computeEditDiff(filePath, content, newContent)
     if (payload && callbacks.onFileEdit) callbacks.onFileEdit(toolCallId, payload)
 
@@ -173,7 +164,6 @@ async function executeShell(
   // shell provider 封装了当前平台的 spawn/cancel/timeout 细节。
   const proc = getShellProvider().spawn(command, { timeout, signal })
 
-  // 先告诉 UI：命令开始跑了。
   reportProgress(toolCallId, 'Running command...')
 
   // 把实时进度消息节流到最多每 50ms 一次。
@@ -185,19 +175,15 @@ async function executeShell(
   const onChunk = (chunk: Buffer) => {
     const s = chunk.toString()
 
-    // 原始输出还是完整转发给 UI 输出区。
     callbacks.onShellOutput(s)
     const now = Date.now()
     if (now - lastProgressTime < PROGRESS_THROTTLE_MS) return
 
-    // 取 chunk 里最后一条非空行作为进度消息。
-    // 这样看起来最像“当前卡在哪一步”。
     const lines = s.split(/\r?\n/).filter((l) => l.trim().length > 0)
     const last = lines[lines.length - 1]
     if (last) {
       lastProgressTime = now
 
-      // 太长就截断，避免进度文本把 UI 顶乱。
       const trimmed = last.length > 120 ? last.slice(0, 117) + '...' : last
       reportProgress(toolCallId, trimmed)
     }
@@ -206,15 +192,11 @@ async function executeShell(
   proc.stdout?.on('data', onChunk)
   proc.stderr?.on('data', onChunk)
 
-  // 等待子进程结束。这里拿到的是完整结果，不是实时流。
   const result = await proc
-  // 在错误到达模型前，把 PowerShell/cmd 多行错误块折叠成单行。
-  // 这样做是为了减少“重复错误噪音”淹没真正诊断信息。
   const toStr = (v: unknown): string => (typeof v === 'string' ? v : '')
   let stdout = foldShellErrorNoise(toStr(result.stdout))
   let stderr = foldShellErrorNoise(toStr(result.stderr))
 
-  // 如果输出太多导致 buffer 满了，就把正文截断并明确标记。
   const isMaxBuffer = result.isMaxBuffer ?? false
   if (isMaxBuffer) {
     const INLINE_CAP = 30_000
@@ -224,7 +206,6 @@ async function executeShell(
       stderr = stderr.slice(0, INLINE_CAP) + '\n... [stderr truncated — exceeded buffer limit]'
   }
 
-  // 合并 stdout 和 stderr，给模型一个单独的输出块。
   const output = [stdout, stderr].filter(Boolean).join('\n').trim()
   if (result.exitCode !== 0 || isMaxBuffer) {
     const suffix = isMaxBuffer ? ' (output exceeded buffer limit)' : ''
@@ -248,11 +229,8 @@ function pushToolResult(
   output: string,
   isError = false,
 ): void {
-  // state.messages 里的 tool-result 是 provider 协议必需品，UI 回调只是展示层。
   state.messages.push(toolResultMessage(toolCallId, toolName, output))
 
-  // 清理该 tool_call 对应的 progress reporter，避免后续进度继续刷同一个 id。
-  // 自动执行工具会在 SDK 的流事件里自己清理，这里重复调用也不会有副作用。
   clearProgressReporter(toolCallId)
   callbacks.onToolResult(toolCallId, output, isError)
 }
@@ -284,7 +262,6 @@ interface HandlerCtx {
 async function pushSuccessfulToolResult(ctx: HandlerCtx, output: string, isError: boolean): Promise<void> {
   let effectiveOutput = output
   if (ctx.options.hookBus?.has('PostToolUse')) {
-    // PostToolUse 可以改写工具输出，再把改写后的结果写回模型历史。
     try {
       const decisions = await ctx.options.hookBus.emit(
         {
@@ -347,7 +324,6 @@ async function handleTask(ctx: HandlerCtx): Promise<void> {
 
 /** listMcpResources：列出当前可见的 MCP 资源。 */
 async function handleListMcpResources(ctx: HandlerCtx): Promise<void> {
-  // 这里只读本地 registry，不访问远端 server。
   const { input, toolCallId, toolName, state, options, callbacks } = ctx
   const registry = options.mcpRegistry
   if (!registry) {
@@ -376,7 +352,6 @@ async function handleListMcpResources(ctx: HandlerCtx): Promise<void> {
 
 /** readMcpResource：按 URI 读取一个 MCP 资源。 */
 async function handleReadMcpResource(ctx: HandlerCtx): Promise<void> {
-  // 通过 URI 找到拥有它的 MCP server，再发起读取。
   const { input, toolCallId, toolName, state, options, callbacks } = ctx
   const registry = options.mcpRegistry
   if (!registry) {
@@ -492,7 +467,6 @@ async function applyLoopGuard(ctx: HandlerCtx, deferred: ModelMessage[]): Promis
 
     // 用户选择 Pause 时，准备让本轮停止在一个清晰状态。
     if (answer.toLowerCase().startsWith('pause')) {
-      // 清空最近调用窗口，避免用户指导后模型合法地重试一次时又立刻触发 guard。
       state.recentToolCalls = []
 
       // 把提示延迟到本轮末尾再写，保持 assistant -> tool -> tool -> user 的顺序。
@@ -546,8 +520,6 @@ async function executeWriteOrShell(ctx: HandlerCtx): Promise<{ output: string; i
     if (toolName === 'writeFile' || toolName === 'edit') {
       const output = await executeWriteTool(toolName, input, toolCallId, callbacks, options.abortSignal)
 
-      // executeWriteTool 对“旧字符串找不到/不唯一”这类失败会返回错误字符串而不是 throw。
-      // 这里把它识别成错误结果，方便 UI 用红色展示。
       const isError = isToolErrorString(output)
       if (!isError) state.filesModified.add(input.filePath as string)
       return { output, isError }
@@ -564,7 +536,6 @@ async function executeWriteOrShell(ctx: HandlerCtx): Promise<{ output: string; i
       return { output: shellResult.output, isError: shellResult.isError }
     }
 
-    // 带 execute 的工具（readFile、glob、grep 等）已经由 AI SDK 自动执行。
     return null
   } catch (err) {
     return { output: toolErrorFromUnknown(err), isError: true }
@@ -596,8 +567,6 @@ async function handleToolCall(
     parentModel,
   }
 
-  // ---- 插件 hook：PreToolUse ----
-  // 在任何真正执行之前先让插件看一眼，必要时可以改参数、拒绝工具。
   if (ctx.options.hookBus?.has('PreToolUse')) {
     try {
       const decisions = await ctx.options.hookBus.emit(
@@ -622,7 +591,6 @@ async function handleToolCall(
         return
       }
 
-      // 如果 hook 改写了参数，就把新的 input 往下传。
       if (effect.args && typeof effect.args === 'object' && !Array.isArray(effect.args)) {
         ctx.input = effect.args as Record<string, unknown>
       }
@@ -669,21 +637,15 @@ async function handleToolCall(
     return
   }
 
-  // MCP 工具有独立权限路径，不走 writeFile/edit/shell 的那套逻辑。
-  // 是否是 MCP 工具，不靠名字猜，而是直接查 registry。
   if (ctx.options.mcpRegistry?.get(ctx.toolName)) {
     await handleMcpToolCall(ctx, deferred)
     return
   }
 
-  // 普通本地副作用工具先做 loop guard，再做权限门。
-  // 在这个函数中，不论有没有熔断，都要记录 recordToolCall（这个数组是记录最近调用的工具）。然后如果是熔断的情况下直接推送消息进pushToolResult，不再向下执行 execute 
   if (await applyLoopGuard(ctx, deferred)) return 
 
-  // 走到这里，证明没有熔断。校验是否有权限，没有权限则pushToolResult中推送消息然后直接返回
   if (!(await checkWriteOrShellPermission(ctx))) return
 
-  // 只剩下真正要执行的本地副作用工具了。
   const result = await executeWriteOrShell(ctx)
   if (result == null) return
 
@@ -696,7 +658,6 @@ async function handleToolCall(
  * 它和 writeFile/edit/shell 并列，但权限和执行入口都走 MCP 自己的注册表。
  */
 async function handleMcpToolCall(ctx: HandlerCtx, deferred: ModelMessage[]): Promise<void> {
-  // MCP 工具有独立 registry 和权限存储，所以和 writeFile/edit/shell 分开处理。
   const { toolName, input, toolCallId, state, options, callbacks } = ctx
   const registry = options.mcpRegistry
   const permissions = options.mcpPermissionStore
@@ -713,7 +674,6 @@ async function handleMcpToolCall(ctx: HandlerCtx, deferred: ModelMessage[]): Pro
     return
   }
 
-  // 先做 loop guard，防止模型对同一个 MCP 工具无脑重复失败。
   const entry = registry.get(toolName)
   if (!entry) {
     pushToolResult(state, callbacks, toolCallId, toolName, toolErrorString(`MCP tool not found: ${toolName}`), true)
@@ -755,7 +715,6 @@ async function handleMcpToolCall(ctx: HandlerCtx, deferred: ModelMessage[]): Pro
       return
     }
 
-    // 把用户答案转成统一的权限分类。
     const choice = classifyDecision(decision)
     if (choice === 'deny') {
       pushToolResult(state, callbacks, toolCallId, toolName, 'Permission denied by user.')
@@ -767,7 +726,6 @@ async function handleMcpToolCall(ctx: HandlerCtx, deferred: ModelMessage[]): Pro
     }
   }
 
-  // 真正执行 MCP 调用：abortSignal 一路传下去，用户按 Esc 可以中断。
   reportProgress(toolCallId, `Calling ${entry.serverName}/${entry.rawName}`)
   try {
     const result = await registry.callTool(toolName, ctx.input, options.abortSignal)
@@ -911,18 +869,13 @@ export async function processToolCalls(
   callbacks: AgentCallbacks,
   parentModel: LanguageModel,
 ): Promise<void> {
-  // 本函数只处理“当前模型回合”的工具调用；历史工具结果不会在这里重放。
   const activeIds = collectActiveAssistantToolCallIds(state)
   const fulfilledIds = collectFulfilledToolCallIds(state)
 
-  // 本轮延迟队列：这些消息必须在本轮所有 tool-result 之后落地。
-  // 这样可以避免把 user 消息插在 tool_result 中间。
   const deferred: ModelMessage[] = []
 
-  // 先做预过滤：丢掉 ghost call 和已经 fulfilled 的调用。
   const liveCalls: ToolCall[] = []
   for (const tc of toolCalls) {
-    // 跳过 SDK 在 stream 中途拒绝的 ghost call。
     if (activeIds.size > 0 && !activeIds.has(tc.toolCallId)) {
 
       continue
@@ -961,11 +914,9 @@ export async function processToolCalls(
     liveCalls.push(tc)
   }
 
-  // 按批次分发。
   const batches = partitionToolCalls(liveCalls)
   let dispatched = 0
   for (const batch of batches) {
-    // 用户按了 Esc / Ctrl+C。当前正在跑的工具可能已被 cancelSignal 取消。
     if (options.abortSignal?.aborted) {
       for (let j = dispatched; j < liveCalls.length; j++) {
         pushToolResult(
@@ -980,11 +931,9 @@ export async function processToolCalls(
       break
     }
 
-    // task 批次并行，其它批次通常只有一个调用。
     await Promise.all(batch.map((tc) => handleToolCall(tc, state, options, callbacks, parentModel, deferred)))
     dispatched += batch.length
   }
 
-  // 本轮所有 tool_result 处理完后，再统一 flush 延迟消息。
   if (deferred.length > 0) state.messages.push(...deferred)
 }

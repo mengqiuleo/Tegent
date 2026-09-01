@@ -89,9 +89,7 @@ function resolveSubModel(
   parentOptions: AgentOptions,
   parentModel: LanguageModel,
 ): LanguageModel {
-  // 子代理没有指定 model 时，直接继承父模型。
   if (!agentDef.model) return parentModel
-  // CLI 未注入 modelRegistry 时，也只能继承父模型。
   if (!parentOptions.modelRegistry) return parentModel
 
   const resolvedId = resolveModelId(agentDef.model)
@@ -99,9 +97,7 @@ function resolveSubModel(
 
   try {
     return parentOptions.modelRegistry.languageModel(resolvedId as `${string}:${string}`)
-  } catch {
-    // 模型覆盖解析失败时不要让 task 失败，
-    
+  } catch {    
     return parentModel
   }
 }
@@ -170,7 +166,6 @@ export async function runSubAgent(args: RunSubAgentArgs, parentModel: LanguageMo
     }
   }
 
-  // 通知 UI：子代理开始运行。UI 会用这些事件构造 task 折叠块。
   callbacks.onSubAgentEvent?.({
     kind: 'start',
     toolCallId,
@@ -179,8 +174,6 @@ export async function runSubAgent(args: RunSubAgentArgs, parentModel: LanguageMo
     prompt,
   })
 
-  // 插件 hook：SubagentStart。
-  // 在 agent 定义解析完成后、嵌套 agentLoop 运行前触发。best-effort。
   emitSubAgentHook(
     parentOptions.hookBus,
     {
@@ -218,8 +211,6 @@ export async function runSubAgent(args: RunSubAgentArgs, parentModel: LanguageMo
     subAgentRegistry: undefined,
   }
 
-  // 构造子代理 callbacks：
-  // 子循环事件会折叠后转发给父 UI，但不会直接把子状态混进父状态。
   const subCallbacks: AgentCallbacks = {
     onTextDelta: (delta) => {
       callbacks.onSubAgentEvent?.({ kind: 'text-delta', toolCallId, delta })
@@ -268,8 +259,6 @@ export async function runSubAgent(args: RunSubAgentArgs, parentModel: LanguageMo
     const finalText = extractFinalText(finalSubState.messages)
     const toolUseCount = countToolCalls(finalSubState.messages)
 
-    // 把子代理 token 用量累计回父状态。
-    // 不混入子代理 messages，只累计 usage，让 /usage 能反映真实花费。
     parentState.tokenUsage.inputTokens += finalSubState.tokenUsage.inputTokens
     parentState.tokenUsage.outputTokens += finalSubState.tokenUsage.outputTokens
     parentState.tokenUsage.totalTokens = parentState.tokenUsage.inputTokens + parentState.tokenUsage.outputTokens

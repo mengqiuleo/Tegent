@@ -18,7 +18,6 @@ import { USER_TEGENT_DIR } from '../utils.js'
 import { mediaTypeFor } from '../utils/media-type.js'
 import { captionImage, pickVisionProvider } from './vision-fallback.js'
 
-// 中文导读：
 // 这个文件把用户输入里的 @file 或裸绝对路径转换成 AI SDK user message content。
 // 文本/Office/PDF 会优先在本地提取成 TextPart，图片会根据 provider 能力决定：
 // 能看图就传 ImagePart，不能看图就先尝试视觉子代理生成描述，再退回本地 OCR。
@@ -154,13 +153,11 @@ function tooLargeMessage(filePath: string, sizeBytes: number): string {
 /** 先按扩展名分类；扩展名缺失或不认识时，再退回 magic-byte 检测。 */
 export async function classifyFile(filePath: string): Promise<FileKind> {
   const ext = path.extname(filePath).toLowerCase()
-  // 先信扩展名：快，而且覆盖绝大多数用户手动引用的文件。
   if (TEXT_EXTENSIONS.has(ext)) return 'text'
   if (IMAGE_EXTENSIONS.has(ext)) return 'image'
   if (OFFICE_EXTENSIONS.has(ext)) return 'office'
   if (ext === '.pdf') return 'pdf'
 
-  // 未知扩展名：读取 magic bytes 试探文件类型。
   try {
     const { fileTypeFromFile } = await import('file-type')
     const detected = await fileTypeFromFile(filePath)
@@ -186,7 +183,6 @@ export async function classifyFile(filePath: string): Promise<FileKind> {
  * 按绝对路径去重，所以同一文件被引用两次也只会 ingest 一次。
  */
 export function extractFileReferences(input: string): FileReference[] {
-  // Map 用 absolutePath 去重：同一个文件既 @ 了一次又裸路径出现时只读一次。
   const refs = new Map<string, FileReference>()
 
   // @path：一个 token，遇到空白停止。@ 必须在行首或前面是空白，
@@ -227,7 +223,6 @@ async function readTextFile(filePath: string): Promise<string> {
  *  失败时返回空字符串，由调用方决定是否退回 OCR。 */
 async function extractPdfText(filePath: string): Promise<string> {
   try {
-    // 先尝试直接抽文本：对文本 PDF 便宜且准，避免把整本 PDF 当图片传模型。
     const { PDFParse } = await import('pdf-parse')
     const buffer = await fs.readFile(filePath)
     const parser = new PDFParse({ data: new Uint8Array(buffer) })
@@ -304,7 +299,6 @@ export async function ocrImage(filePath: string): Promise<string> {
  *  因此不需要额外 pdf-to-img 依赖。 */
 async function ocrPdf(filePath: string): Promise<string> {
   try {
-    // 扫描版 PDF 先 rasterize 成页面图片，再逐页 OCR。
     const { PDFParse } = await import('pdf-parse')
     const buffer = await fs.readFile(filePath)
     const parser = new PDFParse({ data: new Uint8Array(buffer) })
@@ -425,9 +419,7 @@ export async function ingestFile(
     ]
   }
 
-  // 图片。
   if (caps.image) {
-    // 多模态模型直接拿原图，前面补一个 file path 标记帮助模型知道来源。
     try {
       const buffer = await fs.readFile(ref.absolutePath)
       return [
@@ -458,14 +450,12 @@ export async function ingestFile(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       onNotice?.(`Vision sub-agent (${sub.label}) failed: ${msg} — falling back to OCR`)
-      // 继续落到 OCR 兜底。
     }
   }
 
   // DeepSeek + 图片且无子代理（或子代理失败）：OCR。
   // 明确告诉模型这不是视觉理解，避免它自信描述颜色/布局等不可见内容。
   const ocr = await ocrImage(ref.absolutePath)
-  // 最后兜底：只有 OCR 文本可见，明确告诉模型不要假装理解视觉内容。
   return [
     {
       type: 'text',
@@ -485,7 +475,6 @@ export async function buildUserContent(
   onNotice?: (msg: string) => void,
 ): Promise<string | Array<TextPart | ImagePart | FilePart>> {
   const refs = extractFileReferences(text)
-  // 没附件时保留 string fast path，避免改变 provider 的普通文本行为。
   if (refs.length === 0) return text
 
   const parts: IngestedPart[] = [{ type: 'text', text }]

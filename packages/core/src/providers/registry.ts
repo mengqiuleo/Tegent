@@ -74,7 +74,7 @@ const deepseekReasoningFetch: typeof fetch = async (input, init) => {
       return permanentErrorFetch(input, { ...init, body: JSON.stringify(body) })
     }
   } catch {
-    // 请求体不是我们能识别的 JSON，保持原样透传。
+
   }
 
   return permanentErrorFetch(input, init)
@@ -202,7 +202,6 @@ const permanentErrorFetch: typeof fetch = async (input, init) => {
   for (const category of PERMANENT_ERROR_CATEGORIES) {
     const hit = category.patterns.some((p) => (typeof p === 'string' ? lower.includes(p) : p.test(lower)))
     if (!hit) continue
-    // provider 已经返回正确状态码时不需要改写。
     if (response.status === category.status) return response
     // 保留原始响应体：SDK 的错误解析器仍会从里面提取 provider 的 message 字段，
     // 下游 classifyApiError 也能据此给出更友好的恢复提示。

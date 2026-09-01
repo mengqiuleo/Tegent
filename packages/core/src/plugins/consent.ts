@@ -1,22 +1,3 @@
-// 在插件内容真正写入缓存前，installer 会构建一个 `ConsentPreview`，
-// 概括该插件将贡献什么能力，例如 hooks、MCP servers、作用域等，然后把它交给
-// 调用方提供的 consent callback。callback 返回 false 时，安装立即中止，
-// 临时目录也会被清理。
-//
-// 预览基于已经解析过的 manifest 构建，因此 manifest 校验已经完成。也就是说，
-// 当我们询问用户“是否接受”时，已经知道这个插件能够被正确解析，也知道它大概会
-// 触碰用户系统里的哪些能力面。
-//
-// 它有意不包含：
-//
-//   - Skill / agent / command 数量：这些内容藏在子目录里，只为了构建预览去扫描
-//     会拖慢每次安装；预览目标是快速扫一眼，不是完整审计。
-//   - LICENSE 文件正文：这里只展示许可证名称；用户需要通过 homepage / source URL
-//     阅读真实条款。
-//
-// 它会包含真正有安全影响面的东西：hooks（可执行任意 shell）、MCP servers
-// （可启动任意子进程）以及来源信息（让用户知道它来自可信 marketplace 还是
-// 某个随机 GitHub 仓库）。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -140,8 +121,7 @@ export async function probePluginRoot(rootDir: string): Promise<RootProbe> {
       const { servers } = parseServersBlock(block)
       rootMcpServerNames = Object.keys(servers)
     } catch {
-      // 这里故意吞掉解析错误；真正加载时会给出精确错误。
-      // 授权预览阶段只需要知道文件确实存在。
+
     }
     break
   }
@@ -157,7 +137,7 @@ export async function probePluginRoot(rootDir: string): Promise<RootProbe> {
       const cfg = parseHookConfig(parsed, rootDir)
       rootHookEvents = Object.keys(cfg) as HookEventName[]
     } catch {
-      // 和 mcp 探测一样，解析错误留给加载阶段报告。
+
     }
   }
 
@@ -230,8 +210,7 @@ export function buildConsentPreview(input: BuildPreviewInput): ConsentPreview {
         const cfg = parseHookConfig(m.hooks, input.pluginId)
         hookEvents = Object.keys(cfg) as HookEventName[]
       } catch {
-        // hook 解析错误不应让 consent 阶段失败；安装 / 加载路径会正式报告。
-        // 这里保持 hookEvents 为空，避免预览声称注册了实际上没解析成功的事件。
+
       }
     }
   } else if (probe?.hasRootHooksFile) {

@@ -210,10 +210,8 @@ const PS_INNER_CMD_RE = /["']?\s*(?:&\s*\{?\s*)?([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z
  *   ''                                                       → null
  */
 export function extractCommandPrefix(command: string): string | null {
-  // 先去掉首尾空白。
   const cmd = command.trim()
 
-  // 空命令没有可提取的前缀。
   if (!cmd) return null
 
   // PowerShell 启动器要优先处理。
@@ -233,25 +231,15 @@ export function extractCommandPrefix(command: string): string | null {
     // derived 保存目前已经推导出的 prefix。
     let derived: string | null = null
 
-    // 逐段检查复合命令。
     for (const seg of segments) {
-      // 只读段和 cd 段不影响权限锚点，跳过。
       if (isReadOnly(seg) || CD_LIKE_RE.test(seg.trim())) continue
 
-      // 对单个命令段提取 prefix。
       const segPrefix = extractSingleCommandPrefix(seg)
 
-      // 某段提不出 prefix，则整体不适合 prefix 规则。
       if (!segPrefix) return null
-
-      // 第一段有效命令决定 derived。
       if (derived === null) derived = segPrefix
-
-      // 后续有效命令必须和第一段 prefix 一样，否则不能合并成一个规则。
       else if (derived !== segPrefix) return null
     }
-
-    // 可能为 null，例如所有段都是只读/cd。
     return derived
   }
 
@@ -265,14 +253,10 @@ export function extractCommandPrefix(command: string): string | null {
  * 这里假设调用方已经处理过复合命令拆分。
  */
 function extractSingleCommandPrefix(command: string): string | null {
-  // 去掉首尾空白。
   const cmd = command.trim()
 
-  // 空段没有 prefix。
   if (!cmd) return null
 
-  // 简单按空白切 token。
-  // 这里不是完整 shell parser，所以遇到复杂引号时会保守返回 null。
   const tokens = cmd.split(/\s+/).filter(Boolean)
   if (tokens.length === 0) return null
 
@@ -283,18 +267,13 @@ function extractSingleCommandPrefix(command: string): string | null {
     const tok = tokens[i]!
     const m = /^([A-Za-z_]\w*)=/.exec(tok)
 
-    // 不是 NAME=... 形状，说明环境变量前缀结束。
     if (!m) break
 
-    // 环境变量名不在安全名单里，拒绝提取 prefix。
     if (!SAFE_ENV_VARS.has(m[1]!)) return null
 
-    // 如果环境变量值有未闭合引号，说明简单空白切分已经破坏 token 边界。
-    // 这种情况不安全，拒绝提取 prefix。
     const value = tok.slice(m[0].length)
     if (hasUnclosedQuote(value)) return null
 
-    // 当前环境变量安全，继续看下一个 token。
     i++
   }
 
@@ -324,7 +303,6 @@ function extractSingleCommandPrefix(command: string): string | null {
   const sub = rest[subIdx]!
   if (!SUBCOMMAND_RE.test(sub)) return null
 
-  // 返回 “主命令 子命令” 作为 prefix。
   return `${rest[0]} ${sub}`
 }
 
@@ -338,7 +316,6 @@ function hasUnclosedQuote(s: string): boolean {
   // 双引号计数。
   let dq = 0
 
-  // 简单计数即可；这里只用于判断环境变量 token 是否明显被空白切坏。
   for (const ch of s) {
     if (ch === "'") sq++
     else if (ch === '"') dq++
@@ -387,8 +364,6 @@ function skipGlobalFlags(tokens: string[], firstLower: string): number {
     // 未知的 -xxx 按布尔 flag 处理，跳过一个。
     i++
   }
-
-  // 返回推测出的子命令位置。
   return i
 }
 
@@ -396,7 +371,6 @@ function skipGlobalFlags(tokens: string[], firstLower: string): number {
  * 从 powershell/pwsh 启动命令中提取内部命令前缀。
  */
 function extractPowershellPrefix(cmd: string): string | null {
-  // 简单按空白拆 token。
   const tokens = cmd.split(/\s+/).filter(Boolean)
 
   // 第 0 个 token 是 powershell/pwsh 启动器，从第 1 个开始扫描参数。
@@ -434,7 +408,6 @@ function extractPowershellPrefix(cmd: string): string | null {
       continue
     }
 
-    // 其它无值 flag 跳过一个。
     i++
   }
 
@@ -463,17 +436,14 @@ function extractPowershellPrefix(cmd: string): string | null {
  * 当前内部主要使用更完整的 extractCompoundRules；这个导出保留给兼容调用方。
  */
 export function extractCompoundPrefixes(command: string): string[] | null {
-  // 去掉整条命令首尾空白。
   const cmd = command.trim()
 
-  // 空命令没有可提取内容。
   if (!cmd) return null
 
   // PowerShell 启动器作为一个整体处理，避免误拆内部脚本。
   if (POWERSHELL_LAUNCHER_RE.test(cmd)) {
     const p = extractPowershellPrefix(cmd)
 
-    // 提取成功就包装成单元素数组，否则返回 null。
     return p ? [p] : null
   }
 
@@ -481,21 +451,17 @@ export function extractCompoundPrefixes(command: string): string[] | null {
   const segments = splitShellCommands(cmd)
   if (segments.length === 0) return null
 
-  // seen 用来去重，避免相同 prefix 重复加入结果。
   const seen = new Set<string>()
 
   // out 保留稳定的首次出现顺序。
   const out: string[] = []
 
-  // 逐段提取 prefix。
   for (const seg of segments) {
     // 只读命令和目录切换命令不需要形成权限规则。
     if (isReadOnly(seg) || CD_LIKE_RE.test(seg.trim())) continue
 
-    // 提取当前命令段的 prefix。
     const p = extractSingleCommandPrefix(seg)
 
-    // 有一个有效段无法提取，就不能声称完整描述了复合命令。
     if (!p) return null
 
     // 只保存第一次遇到的 prefix。
@@ -505,7 +471,6 @@ export function extractCompoundPrefixes(command: string): string[] | null {
     }
   }
 
-  // 所有段都被过滤时返回 null，否则返回 prefix 列表。
   return out.length === 0 ? null : out
 }
 
@@ -526,7 +491,6 @@ export function extractCompoundPrefixes(command: string): string[] | null {
  * 这样不会因为其中一个命令只能精确匹配，就丢掉另一个可复用的 prefix 规则。
  */
 export function extractCompoundRules(command: string): AllowRule[] | null {
-  // 去掉首尾空白。
   const cmd = command.trim()
   if (!cmd) return null
 
@@ -542,15 +506,11 @@ export function extractCompoundRules(command: string): AllowRule[] | null {
   const segments = splitShellCommands(cmd)
   if (segments.length === 0) return null
 
-  // seen 用 “类型:模式” 去重。
   const seen = new Set<string>()
 
-  // out 保存最终规则列表。
   const out: AllowRule[] = []
 
-  // 逐段生成规则。
   for (const seg of segments) {
-    // 统一去掉当前命令段首尾空白。
     const trimmed = seg.trim()
 
     // 只读段和目录切换段不需要用户授权规则。
@@ -587,7 +547,6 @@ export function extractCompoundRules(command: string): AllowRule[] | null {
     }
   }
 
-  // 没生成任何规则时返回 null。
   return out.length === 0 ? null : out
 }
 
@@ -602,21 +561,15 @@ export function extractCompoundRules(command: string): AllowRule[] | null {
  * - MCP：`this MCP tool`
  */
 export function suggestRuleLabel(toolName: string, input: Record<string, unknown>, isMcp = false): string | null {
-  // enterPlanMode 只是模式切换，不适合提供长期授权选项。
   if (toolName === 'enterPlanMode') return null
 
-  // MCP 工具使用统一文案；实际持久化由 MCP 权限存储处理。
   if (isMcp) return 'this MCP tool'
 
-  // shell 文案要根据命令提取出的规则动态生成。
   if (toolName === 'shell') {
-    // 取 shell 命令字符串。
     const cmd = (input.command as string) ?? ''
 
-    // 尝试为每个命令段生成权限规则。
     const rules = extractCompoundRules(cmd)
 
-    // 完全无法生成规则时，只能表示“这条精确命令”。
     if (!rules || rules.length === 0) return 'this exact command'
 
     // 如果唯一规则就是完整命令的 exact 匹配，显示简洁的固定文案，
@@ -651,15 +604,11 @@ export function buildAllowRule(
   toolName: string,
   input: Record<string, unknown>,
 ): { rules: AllowRule[]; persist: boolean } | null {
-  // shell 需要根据具体命令生成细粒度规则。
   if (toolName === 'shell') {
-    // 取命令参数。
     const cmd = (input.command as string) ?? ''
 
-    // 优先逐段构建规则。
     const rules = extractCompoundRules(cmd)
     if (rules && rules.length > 0) {
-      // shell 规则允许跨会话持久化。
       return { rules, persist: true }
     }
 
@@ -688,14 +637,10 @@ export function buildAllowRule(
 function stripSafeEnvVars(command: string): string {
   let cmd = command.trim()
 
-
   while (true) {
     const m = ENV_VAR_RE.exec(cmd)
-
     if (!m) break
-
     if (!SAFE_ENV_VARS.has(m[1]!)) break
-
     cmd = cmd.slice(m[0].length)
   }
 
@@ -748,7 +693,7 @@ function getPermissionsPath(cwd: string): string {
   return path.join(cwd, TEGENT_DIR, 'local', 'permissions.json')
 }
 
-// ─── 当前会话的内存规则存储 ───
+
 
 /**
  * 保存当前 CLI 会话已经批准的权限规则。
@@ -770,10 +715,8 @@ class SessionPermissionStore {
    * 完全相同的 tool/pattern/type 不会重复添加。
    */
   addRule(rule: AllowRule): void {
-    // 检查是否已经存在完全相同的规则。
     const exists = this.rules.some((r) => r.tool === rule.tool && r.pattern === rule.pattern && r.type === rule.type)
 
-    // 不存在时才追加。
     if (!exists) this.rules.push(rule)
   }
 
@@ -781,22 +724,16 @@ class SessionPermissionStore {
    * 判断一次工具调用是否命中当前保存的 allow 规则。
    */
   matches(toolName: string, input: Record<string, unknown>): boolean {
-    // 非 shell 工具目前只支持 tool 级别规则。
     if (toolName !== 'shell') {
-      // 遍历全部规则，寻找同工具名的 tool 规则。
       for (const rule of this.rules) {
-        // 规则属于其它工具，跳过。
         if (rule.tool !== toolName) continue
 
-        // tool 规则表示这个工具整体放行。
         if (rule.type === 'tool') return true
       }
 
-      // 没找到工具级规则，表示不匹配。
       return false
     }
 
-    // shell 工具需要取出具体命令进行 exact/prefix 匹配。
     const cmd = (input.command as string) ?? ''
 
     // 第一轮匹配：
@@ -911,7 +848,7 @@ export function clearSessionRules(): void {
   store.clear()
 }
 
-// ─── 磁盘持久化 ───
+
 
 /**
  * 从 `.tegent/local/permissions.json` 加载持久化权限规则。
@@ -921,41 +858,28 @@ export function clearSessionRules(): void {
  * 文件不存在、JSON 损坏或字段格式不正确时会静默忽略。
  */
 export function loadPersistedRules(cwd: string): void {
-  // 计算项目对应的权限文件路径。
   const filePath = getPermissionsPath(cwd)
 
-  // raw 保存读取到的原始 JSON 文本。
   let raw: string
   try {
-    // 同步读取是有意的：权限规则通常在启动阶段加载，文件很小。
     raw = fs.readFileSync(filePath, 'utf-8')
   } catch {
-    // 文件不存在或无法读取时，不影响程序启动。
     return
   }
 
-  // data 只关心 allow 字符串数组。
   let data: { allow?: string[] }
   try {
-    // 解析 JSON。
     data = JSON.parse(raw) as { allow?: string[] }
   } catch {
-    // JSON 损坏时忽略整个文件。
     return
   }
 
-  // allow 不是数组则认为文件格式无效。
   if (!Array.isArray(data.allow)) return
 
-  // 逐条解析规则。
   for (const entry of data.allow) {
-    // 非字符串条目直接跳过。
     if (typeof entry !== 'string') continue
-
-    // 从磁盘字符串格式还原 AllowRule。
     const rule = parseRuleString(entry)
 
-    // 合法规则加入内存 store，重复规则会被去重。
     if (rule) store.addRule(rule)
   }
 }
@@ -966,39 +890,25 @@ export function loadPersistedRules(cwd: string): void {
  * 文件不存在时自动创建；相同规则已经存在时不会重复写入。
  */
 export function persistRule(cwd: string, rule: AllowRule): void {
-  // 计算目标文件路径。
   const filePath = getPermissionsPath(cwd)
-
-  // 把结构化规则序列化成磁盘字符串。
   const ruleStr = ruleToString(rule)
 
-  // 默认从空 allow 数组开始。
   const data: { allow: string[] } = { allow: [] }
   try {
-    // 尝试读取已有文件。
     const raw = fs.readFileSync(filePath, 'utf-8')
-
-    // 解析已有 JSON。
     const parsed = JSON.parse(raw) as { allow?: string[] }
 
-    // 只保留已有 allow 中的字符串项。
     if (Array.isArray(parsed.allow)) {
       data.allow = parsed.allow.filter((s): s is string => typeof s === 'string')
     }
   } catch {
-    // 文件不存在或内容损坏时，从空规则文件重新开始。
+ 
   }
 
-  // 已经存在相同规则时直接返回，避免重复。
   if (data.allow.includes(ruleStr)) return
-
-  // 追加新规则。
   data.allow.push(ruleStr)
-
-  // 获取 `.tegent/local` 目录路径。
   const dir = path.dirname(filePath)
 
-  // 递归创建目录。
   fs.mkdirSync(dir, { recursive: true })
 
   // permissions.json 记录了用户愿意自动放行哪些命令，
@@ -1009,6 +919,5 @@ export function persistRule(cwd: string, rule: AllowRule): void {
     fs.writeFileSync(gitignorePath, '*\n', 'utf-8')
   }
 
-  // 格式化写回 JSON，并保留末尾换行。
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8')
 }

@@ -1,16 +1,5 @@
 // `/plugin refresh` 会进入这个模块。它的职责是在不重启 tegent 的前提下重新扫描磁盘上
 // 的已安装插件，并把新的插件状态传播给所有下游 registry。
-//
-// 为什么它是独立模块，而不是 PluginRegistry 的一个方法：
-// 重新加载插件注册表本身只是一行，真正的工作是把新的贡献项折叠进 agent loop
-// 启动时已经捕获的五个下游注册表：skill / sub-agent / command / hook / mcp。
-// 这些引用都必须保持稳定，所以每个 registry 都暴露“原地 reload”的方法，而不是
-// 返回新实例。
-//
-// 当调用方同时传入 mcpRegistry 和 askUser callback 时，这里也会重启 MCP servers；
-// askUser 是项目信任门禁检查所必需的。插件贡献的 MCP servers 会和 user / project
-// servers 合并，然后整体走 `McpRegistry.restartAll(...)`，也就是 `/mcp refresh`
-// 使用的同一路径。没有传 mcpRegistry 的调用方则保持旧行为，只刷新 skill/agent/command/hook。
 import { reloadSubAgentRegistry } from '../agent/sub-agents/registry.js'
 import type { SubAgentRegistry, SubAgentReloadSummary } from '../agent/sub-agents/registry.js'
 import { reloadCommandRegistry } from '../commands/registry.js'
@@ -100,19 +89,12 @@ export interface PluginRefreshTargets {
 export async function refreshPluginContributions(targets: PluginRefreshTargets): Promise<PluginRefreshSummary> {
   const cwd = targets.cwd ?? process.cwd()
 
-  // 1. 从磁盘重新扫描插件。loadAllPlugins 会构建自己的临时 registry；
-  //    我们取出其中的插件列表和加载错误，再通过 reload() 填回调用方持有的
-  //    长生命周期 registry。
   const load = await loadAllPlugins({ cwd })
 
-  // 2. 替换调用方插件 registry 的内部状态，并拿到用于 UI 展示的主 diff。
   const pluginsSummary = targets.pluginRegistry.reload(load.registry.listAll(), [...load.registry.loadErrors()])
 
-  // 3. 基于新的插件集合重新计算下游集成信息：
-  //    skills dirs、agents dirs、commands dirs、mcp servers 和 hook registry。
   const integration = await buildPluginIntegration(load)
 
-  // 4. 把新的贡献项合并进调用方实际传入的每个子 registry。
   const out: PluginRefreshSummary = { plugins: pluginsSummary, hookCount: 0 }
 
   if (targets.skillRegistry) {
@@ -126,15 +108,9 @@ export async function refreshPluginContributions(targets: PluginRefreshTargets):
   }
   if (targets.hookBus) {
     targets.hookBus.replaceRegistry(integration.hookRegistry)
-    // 通过累加新 registry 各事件下的 hook 条目数得到总数。
-    // 这个值只用于用户消息，精确 diff 不值得引入额外复杂度。
     out.hookCount = countHooks(integration.hookRegistry)
   }
 
-  // 5. MCP 重启：只有同时传入 mcpRegistry 和 askUser 时执行。
-  //    这里会重新从磁盘读取 user + project 配置，并合并最新插件贡献的
-  //    extraServers，然后断开并重连整个 MCP 集合。它和 /mcp refresh 走同一路径。
-  //    因此安装带 MCP server 的插件后，只需要 /plugin refresh 一次即可生效。
   if (targets.mcpRegistry && targets.askUser) {
     const merged = await loadMergedConfigsFromDisk({
       cwd,
@@ -158,8 +134,6 @@ export async function refreshPluginContributions(targets: PluginRefreshTargets):
  * @returns 所有已知事件上的 hook 条目总数。
  */
 function countHooks(registry: HookRegistry): number {
-  // HookRegistry 暴露的是 get(eventName) → array；这里遍历已知事件名。
-  // 事件名和 types.ts 有重复，但从那里导入会造成循环依赖，所以在此硬编码小列表。
   const eventNames = [
     'SessionStart',
     'UserPromptSubmit',

@@ -1,9 +1,6 @@
 // 扫描 ~/.tegent/skills/*/SKILL.md 和 <repo-root>/.tegent/skills/*/SKILL.md，
-// 找出带有 YAML frontmatter 的用户自定义技能。每个技能独占一个子目录，
-// 这种结构和 Gemini CLI、Opencode、Codex 等工具保持一致，后续也方便
-// 在 SKILL.md 旁边放 references、scripts、assets 等配套文件。
 //
-// 优先级：同名技能里，项目级技能会覆盖用户级技能。
+// 优先级：同名SKILL里，项目级SKILL会覆盖用户级SKILL。
 // 约束：坏文件只打印警告并跳过，单个损坏的 SKILL.md 不能导致 CLI 崩溃。
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -16,9 +13,9 @@ import type { SkillDefinition } from './registry.js'
 const SKILL_FILENAME = 'SKILL.md'
 
 /**
- * 每个技能最多列出的配套文件数量。
+ * 每个SKILL最多列出的配套文件数量。
  *
- * 这个上限用于控制技能激活时注入给模型的资源列表大小。即使某个技能携带了大量
+ * 这个上限用于控制SKILL激活时注入给模型的资源列表大小。即使某个SKILL携带了大量
  * references、assets、scripts，也不会让激活载荷无限膨胀。
  *
  * 注意：当前函数只负责截断列表本身；调用侧如果需要展示“列表已截断”的提示，
@@ -27,10 +24,10 @@ const SKILL_FILENAME = 'SKILL.md'
 const MAX_LISTED_FILES = 50
 
 /**
- * 列出技能配套文件时要跳过的目录名。
+ * 列出SKILL配套文件时要跳过的目录名。
  *
  * 这些目录通常是隐藏目录、依赖目录或构建产物目录，体积大且很少包含需要注入模型的
- * 技能资源。这里按目录 basename 匹配，不是 glob 规则。
+ * SKILL资源。这里按目录 basename 匹配，不是 glob 规则。
  */
 const SKILL_FILE_LIST_SKIP_DIRS = new Set([
   'node_modules',
@@ -63,8 +60,8 @@ const frontmatterSchema = z.object({
       - scripts/deploy.sh
   </activated_skill>
  *
- * @param skillDir 技能目录的绝对路径。
- * @returns 按字母序排序后的技能资源相对路径列表，路径分隔符统一为 `/`。
+ * @param skillDir SKILL目录的绝对路径。
+ * @returns 按字母序排序后的SKILL资源相对路径列表，路径分隔符统一为 `/`。
  */
 async function listSkillFiles(skillDir: string): Promise<string[]> {
   const out: string[] = []
@@ -104,7 +101,7 @@ async function listSkillFiles(skillDir: string): Promise<string[]> {
  * 解析 SKILL.md 顶部的最小 YAML frontmatter。
  *
  * 这里复用子代理加载器使用的简化规则：只支持字符串标量，不引入 gray-matter 之类的
- * 额外依赖。这样可以让技能加载保持轻量，也避免 YAML 完整语法带来的复杂边界。
+ * 额外依赖。这样可以让SKILL加载保持轻量，也避免 YAML 完整语法带来的复杂边界。
  *
  * @param raw SKILL.md 文件的完整原始文本。
  * @returns 解析成功时返回 frontmatter 数据和正文；没有合法 frontmatter 时返回 null。
@@ -150,15 +147,15 @@ function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: s
 }
 
 /**
- * 从指定目录加载全部技能。
+ * 从指定目录加载全部SKILL。
  *
- * 目录结构要求是 `dir/<skill-name>/SKILL.md`。单个技能解析失败时只跳过该技能，
- * 不会中断其他技能加载，这样一个坏文件不会拖垮整个 CLI。
+ * 目录结构要求是 `dir/<skill-name>/SKILL.md`。单个SKILL解析失败时只跳过该SKILL，
+ * 不会中断其他SKILL加载，这样一个坏文件不会拖垮整个 CLI。
  *
- * @param dir 要扫描的技能根目录。
- * @param source 技能来源，用于 UI 展示和后续优先级判断。
- * @param pluginId 插件贡献技能时携带的插件 ID；普通用户/项目技能没有该值。
- * @returns 从该目录成功加载出来的技能定义列表。
+ * @param dir 要扫描的SKILL根目录。
+ * @param source SKILL来源，用于 UI 展示和后续优先级判断。
+ * @param pluginId 插件贡献SKILL时携带的插件 ID；普通用户/项目SKILL没有该值。
+ * @returns 从该目录成功加载出来的SKILL定义列表。
  */
 async function loadSkillsFromDir(
   dir: string,
@@ -221,25 +218,25 @@ async function loadSkillsFromDir(
 
 export interface LoadSkillsOptions {
   /**
-   * 除内置用户级和项目级路径外，需要额外扫描的技能目录。
+   * 除内置用户级和项目级路径外，需要额外扫描的SKILL目录。
    *
    * 插件系统会通过这里把插件贡献的 `skills/` 目录合并进同一个注册表，相关入口见
    * packages/core/src/plugins/integration.ts。
    *
-   * 顺序很重要：同名技能由后扫描者覆盖。插件技能会早于项目技能扫描，所以项目作者
-   * 可以用项目级技能覆盖插件提供的同名技能。
+   * 顺序很重要：同名SKILL由后扫描者覆盖。插件SKILL会早于项目SKILL扫描，所以项目作者
+   * 可以用项目级SKILL覆盖插件提供的同名SKILL。
    */
   extraDirs?: ReadonlyArray<{ dir: string; pluginId: string }>
 }
 
 /**
- * 加载当前会话可用的全部技能。
+ * 加载当前会话可用的全部SKILL。
  *
- * 默认会按“用户级技能 → 插件技能 → 项目级技能”的顺序加载，最终注册表里同名技能由
+ * 默认会按“用户级SKILL → 插件SKILL → 项目级SKILL”的顺序加载，最终注册表里同名SKILL由
  * 后面的来源覆盖。
  *
- * @param opts 技能加载选项，主要用于传入插件贡献的额外技能目录。
- * @returns 当前进程工作目录下可用的技能定义列表。
+ * @param opts SKILL加载选项，主要用于传入插件贡献的额外SKILL目录。
+ * @returns 当前进程工作目录下可用的SKILL定义列表。
  */
 export async function loadSkills(opts: LoadSkillsOptions = {}): Promise<SkillDefinition[]> {
   const userDir = path.join(USER_TEGENT_DIR, 'skills')
@@ -250,24 +247,24 @@ export async function loadSkills(opts: LoadSkillsOptions = {}): Promise<SkillDef
   const projectSkills = await loadSkillsFromDir(projectDir, 'project')
 
   // 合并顺序：注册表采用“后者覆盖前者”。因此最终优先级是项目级 > 插件级 > 用户级。
-  // 这和对用户说明的规则一致：项目级技能永远可以覆盖插件提供的同名技能。
+  // 这和对用户说明的规则一致：项目级SKILL永远可以覆盖插件提供的同名SKILL。
   return [...userSkills, ...pluginSkills, ...projectSkills]
 }
 
 /**
- * 加载插件系统传入的额外技能目录。
+ * 加载插件系统传入的额外SKILL目录。
  *
- * 插件技能物理上位于用户目录下的插件缓存中，但仍通过 pluginId 保留真实来源，
- * 这样 UI 和调试信息可以区分普通用户技能与插件贡献技能。
+ * 插件SKILL物理上位于用户目录下的插件缓存中，但仍通过 pluginId 保留真实来源，
+ * 这样 UI 和调试信息可以区分普通用户SKILL与插件贡献SKILL。
  *
- * @param extras 插件贡献的额外技能目录列表。
- * @returns 从这些额外目录中加载出的技能定义列表。
+ * @param extras 插件贡献的额外SKILL目录列表。
+ * @returns 从这些额外目录中加载出的SKILL定义列表。
  */
 async function loadFromExtras(extras: LoadSkillsOptions['extraDirs']): Promise<SkillDefinition[]> {
   if (!extras || extras.length === 0) return []
   const out: SkillDefinition[] = []
   for (const { dir, pluginId } of extras) {
-    // 插件技能实际位于 ~/.tegent/plugins/cache/... 这样的用户级缓存目录。
+    // 插件SKILL实际位于 ~/.tegent/plugins/cache/... 这样的用户级缓存目录。
     // 因为它不是项目私有资源，所以 source 使用最接近的 'user'；真实插件来源由 pluginId 表达。
     out.push(...(await loadSkillsFromDir(dir, 'user', pluginId)))
   }

@@ -53,7 +53,6 @@ async function readKnowledgeFile(dir: string): Promise<{ fileName: string; conte
 async function collectProjectKnowledgeChain(
   startDir: string,
 ): Promise<Array<{ dir: string; fileName: string; content: string }>> {
-  // 先只收集“需要检查的目录路径”，暂时不读文件；这样后面可以统一调整顺序。
   const dirs: string[] = []
 
   // 把传入的目录转成绝对路径，避免调用方传入相对路径时，后续 path.dirname 判断出错。
@@ -65,39 +64,23 @@ async function collectProjectKnowledgeChain(
   // 这一段循环负责“从当前目录一路向上走”，例如：
   // `/repo/packages/core/src` -> `/repo/packages/core` -> `/repo/packages` -> `/repo`
   while (true) {
-    // 先把当前目录放进列表；即使它就是 git 根目录，也要检查它自己的 AGENTS.md。
     dirs.push(dir)
-
-    // 如果当前目录里有 `.git`，说明这里大概率是仓库根目录，项目级知识链到这里就够了。
     if (await fileExists(path.join(dir, '.git'))) break
-
-    // 如果已经走到文件系统根目录还没遇到 `.git`，也必须停下，否则会无限向上找。
     if (dir === fsRoot) break
-
-    // 计算当前目录的父目录，下一轮循环会去父目录继续找。
     const parent = path.dirname(dir)
-
-    // 这是一个额外保险：某些路径情况下 dirname 可能返回自身，遇到这种情况也停止。
     if (parent === dir) break
-
-    // 移动到父目录，继续下一轮检查。
     dir = parent
   }
 
-  // 真正返回给调用方的知识条目；每个条目包含目录、命中的文件名、文件内容。
   const entries: Array<{ dir: string; fileName: string; content: string }> = []
 
   // dirs 的收集顺序是“当前目录 -> 父目录 -> 仓库根目录”。
   // 但 system prompt 需要“根目录 -> 当前目录”，让越靠后的、更具体的规则更容易覆盖前面的规则。
   for (const d of dirs.reverse()) {
-    // 在这个目录里尝试读取 AGENTS.md；如果没有，再尝试 CLAUDE.md；都没有就返回 null。
     const found = await readKnowledgeFile(d)
-
-    // 只有真的找到知识文件时，才把它加入项目知识链；没有文件的目录会被自然跳过。
     if (found) entries.push({ dir: d, fileName: found.fileName, content: found.content })
   }
 
-  // 返回从仓库根目录到当前目录的知识文件列表，供 buildKnowledgeContext 拼进 system prompt。
   return entries
 }
 
@@ -111,45 +94,28 @@ export async function buildKnowledgeContext(options?: { sessionContext?: string 
   // 不需要手动改名也能继续生效。
   const userKnowledge = await readKnowledgeFile(USER_DIR)
 
-  // 用户级知识是全局偏好，例如“我喜欢中文回答”“提交信息风格”等，不依赖当前项目。
   if (userKnowledge) {
-    // 标题里带上实际命中的文件名，方便排查到底读的是 AGENTS.md 还是兼容的 CLAUDE.md。
     sections.push(`### User Preferences (~/.tegent/${userKnowledge.fileName})\n${userKnowledge.content}`)
   }
 
-  // 用户级自动记忆通常由程序自动维护，用来记住跨项目都适用的长期偏好。
   const userMemory = getAutoMemory('user')
-
-  // getPromptContent 会把记忆整理成适合注入 prompt 的文本；如果没有内容则返回空字符串。
   const userMemoryContent = userMemory.getPromptContent()
 
-  // 没有记忆内容时不插入空 section，避免 system prompt 变长且产生无意义噪声。
   if (userMemoryContent) {
     sections.push('### User Auto Memory\n' + userMemoryContent)
   }
 
-  // 当前 CLI 进程所在目录就是本轮要服务的项目位置；项目知识链从这里开始向上找。
   const cwd = process.cwd()
-
-  // 收集从仓库根目录到 cwd 的 AGENTS.md/CLAUDE.md 链。
   const projectKnowledge = await collectProjectKnowledgeChain(cwd)
 
-  // 把每个项目知识文件转换成一个 prompt section。
   for (const entry of projectKnowledge) {
-    // 标题中使用相对 cwd 的路径，让 prompt 更短；如果 entry.dir 就是 cwd，则显示 `.`。
     const relPath = path.relative(cwd, entry.dir) || '.'
-
-    // 这里按 collectProjectKnowledgeChain 返回的顺序插入：根目录规则在前，当前目录规则在后。
     sections.push(`### Project ${entry.fileName} (${relPath})\n${entry.content}`)
   }
 
-  // 项目级自动记忆只影响当前项目，通常保存在项目里的 .tegent/memory/auto.md。
   const projectMemory = getAutoMemory('project')
-
-  // 取出项目自动记忆的 prompt 文本；没有可用记忆时是空字符串。
   const projectMemoryContent = projectMemory.getPromptContent()
 
-  // 自动记忆放在项目 AGENTS 链之后，因为它通常是从本项目历史对话中总结出的补充信息。
   if (projectMemoryContent) {
     sections.push('### Project Auto Memory\n' + projectMemoryContent)
   }
@@ -157,20 +123,15 @@ export async function buildKnowledgeContext(options?: { sessionContext?: string 
   // AGENTS.local.md 是当前开发者的本地私有偏好，通常 gitignored，不会提交给团队。
   const localPrefs = await readFileSafe(path.join(cwd, 'AGENTS.local.md'))
 
-  // 本地偏好放得比较靠后，表示它可以补充或覆盖团队共享的项目规则。
   if (localPrefs) {
     sections.push('### Local Preferences (AGENTS.local.md)\n' + localPrefs)
   }
 
-  // sessionContext 是本次会话临时传入的上下文；它不来自文件系统。
   if (options?.sessionContext) {
-    // 临时上下文放最后，表示它最贴近当前这次会话。
     sections.push(options.sessionContext)
   }
 
-  // 如果所有来源都没有内容，就返回空字符串，调用方可以选择不追加 Project Knowledge 段。
   if (sections.length === 0) return ''
 
-  // 用二级标题包起来，并用空行分隔每个 section，形成最终注入 system prompt 的文本。
   return '## Project Knowledge\n\n' + sections.join('\n\n')
 }

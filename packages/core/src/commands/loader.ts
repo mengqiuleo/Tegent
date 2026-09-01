@@ -46,7 +46,7 @@ function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: s
     if (colonIdx < 1) continue
     const key = trimmed.slice(0, colonIdx).trim()
     let value: string = trimmed.slice(colonIdx + 1).trim()
-    // 去掉一层简单引号，保留内部内容；复杂 YAML 类型不在这个轻量解析器的范围内。
+    
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1)
     }

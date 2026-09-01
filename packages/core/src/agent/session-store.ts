@@ -46,7 +46,6 @@ export function getSessionFilePath(
   return path.join(sessionsDir(cwd), `${base}.jsonl`)
 }
 
-// ---- 写入 jsonl 的 entry 类型 ----
 
 interface HeaderEntry {
   t: 'meta'

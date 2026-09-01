@@ -1,14 +1,3 @@
-// 一个 McpClient 实例代表一条服务器连接。MCP SDK 原本需要同时管理
-// `new Client(...)`、`new XxxTransport(...)` 和
-// `client.connect(transport)` 这几个对象 / 步骤；本类把这些细节收进
-// 一个 `connect()` 方法里，并由 `close()` 负责关闭传输层。
-// registry 只需要使用 listTools、callTool、listResources、readResource
-// 和 close 这几个窄接口。
-//
-// AbortSignal 透传也集中在这里：每个发往服务器的 RPC 方法都接受可选
-// AbortSignal，并通过 `RequestOptions.signal` 传给 SDK。用户在工具调用
-// 期间按 Esc 时，agent loop 的 signal 会取消当前 SDK 请求，关闭这次
-// JSON-RPC future，但不会杀掉底层连接；下一次调用仍可复用同一 transport。
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -224,7 +213,6 @@ export class McpClient {
     await this.safeClose()
   }
 
-  // ── 内部实现 ──────────────────────────────────────────────────────────
 
   /**
    * 根据服务器配置创建对应的 SDK transport。

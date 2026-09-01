@@ -18,10 +18,7 @@ const MAX_VERTICAL_CURSOR_JUMP = 10
 const DOUBLE_ESC_WINDOW_MS = 500
 
 interface ChatInputProps {
-  /** CLI scrollback 消息。Ink 版直接渲染最近一段消息，不走原版 stdout 提交路径。 */
   messages: readonly DisplayMessage[]
-  /** 兼容原 ChatInput 的 prop；Ink 版不需要根据 header 行数做光标锚定。 */
-  initialContentRows?: number
   onSubmit: (text: string) => void
   /** Ctrl+C 入口；App 负责双击退出和当前轮取消。 */
   onInterrupt: () => void
@@ -81,11 +78,8 @@ interface FreeformState {
  * @returns Ink 消息块。
  */
 function MessageBlock({ msg }: { msg: DisplayMessage }) {
-  // label 决定每条消息左侧显示 you/assistant/info/$。
   const label = renderMessageLabel(msg)
-  // 用户和命令回显更醒目，用 cyan；其它消息降低视觉权重。
   const labelColor = msg.role === 'user' || msg.kind === 'command-echo' ? 'cyan' : 'gray'
-  // 普通文本按行渲染；trimEnd 避免末尾空行额外撑高消息块。
   const lines = msg.content.length > 0 ? msg.content.trimEnd().split('\n') : []
 
   return (
@@ -142,13 +136,11 @@ function ToolResult({ toolCall }: { toolCall: DisplayToolCall }) {
  * @returns Ink 工具运行区。
  */
 function ActiveTools({ tools }: { tools: readonly ActiveToolCall[] }) {
-  // 没有运行中工具时不渲染这一块，避免产生空白区域。
   if (tools.length === 0) return null
 
   return (
     <Box flexDirection="column">
       {tools.map((tool) => {
-        // 运行中工具也用和已完成工具一致的标签格式。
         const label = getToolLabel(tool.toolName)
         // 运行中工具预览展示命令、路径或任务描述，帮助用户知道正在做什么。
         const preview = toolPreview(tool.toolName, tool.input)
@@ -174,7 +166,6 @@ function ActiveTools({ tools }: { tools: readonly ActiveToolCall[] }) {
  * @returns Ink todo 面板。
  */
 function Todos({ todos }: { todos: readonly TodoItem[] }) {
-  // 没有 todo 时不渲染 todo 面板。
   if (todos.length === 0) return null
 
   return (
@@ -216,7 +207,7 @@ function PermissionDialog({ permission, selected }: { permission: PermissionRequ
   const preview = toolPreview(permission.toolName, permission.input, 120)
   // suggestRuleLabel 不为 null 表示可以生成 always-allow 规则。
   const hasAlways = suggestRuleLabel(permission.toolName, permission.input, !!permission.mcp) !== null
-  // 支持永久授权时显示 Yes/Always/No，否则只显示 Yes/No。
+  // 支持永久授权时显示 Yes/Always/No，否则只显No。示 Yes/
   const choices = hasAlways ? ['Yes', 'Always', 'No'] : ['Yes', 'No']
 
   return (
@@ -317,7 +308,6 @@ function CompletionMenu({
     description: cmd.description,
   }))
 
-  // 没有候选时不渲染菜单。
   if (rows.length === 0) return null
 
   return (
@@ -362,7 +352,7 @@ function Footer({
       )}%`
     : ''
 
-  // 三种 footer 内容都为空时，整行不渲染。
+
   if (!modeText && !usageText && !notice) return null
 
   return (
@@ -393,7 +383,6 @@ export function ChatInput({
   permissionMode = 'default',
   contextUsage,
 }: ChatInputProps) {
-  // 主输入框内容和光标位置。用 reducer 保证“改文本 + 移光标”是一次原子状态更新。
   const [{ text, cursor }, dispatch] = useReducer(inputReducer, { text: '', cursor: 0 })
   // 某些键盘处理需要同步读到最新光标，ref 避免闭包拿旧 cursor。
   const cursorRef = useRef(0)
@@ -446,7 +435,6 @@ export function ChatInput({
    * 第一阶段补命令名，第二阶段补 subcommand；`applyText` 保存接受补全后应该写回输入框的完整文本。
    */
   const matches: CommandMatch[] = (() => {
-    // 只有输入以 / 开头时才进入 slash command 补全。
     if (!text.startsWith('/')) return []
     // 第一个空格用来区分“补命令名”和“补子命令”两个阶段。
     const firstSpace = text.indexOf(' ')
@@ -496,7 +484,6 @@ export function ChatInput({
   // 补全菜单是否打开；当前只有 slash 菜单。
   const menuOpen = matches.length > 0
 
-  // 启动时读取项目本地输入历史；失败静默吞掉，历史不是核心功能。
   useEffect(() => {
     let cancelled = false
     void loadInputHistory(initialCwdRef.current).then((entries) => {
@@ -545,18 +532,14 @@ export function ChatInput({
    * @param raw 输入框里的原始文本。
    */
   const pushHistory = (raw: string) => {
-    // 空白输入不写历史。
     if (!raw.trim()) return
-    // 连续提交同一条输入时不重复写历史。
     const last = historyRef.current[historyRef.current.length - 1]
     if (last && last.text === raw) return
-    // 历史条目保存原始文本和时间戳。
     const entry: InputHistoryEntry = { text: raw, ts: Date.now() }
     // 先写入内存历史，Up/Down 立即可用。
     historyRef.current.push(entry)
     // 内存中只保留最近 HISTORY_MAX 条；磁盘文件不在这里裁剪。
     if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift()
-    // 磁盘历史是 best-effort，失败不会打断用户提交。
     void appendInputHistory(entry, initialCwdRef.current)
   }
 
@@ -577,7 +560,6 @@ export function ChatInput({
    * 向更旧的历史记录导航。
    */
   const navigateHistoryUp = () => {
-    // 没有历史时 Up 不做任何事。
     if (historyRef.current.length === 0) return
     // 已经走到最旧历史时继续 Up 不再变化。
     if (historyIndexRef.current >= historyRef.current.length) return
@@ -587,7 +569,6 @@ export function ChatInput({
     }
     // index 表示“从最后一条开始往前数第几条”。
     historyIndexRef.current += 1
-    // 根据 index 从数组尾部取历史项。
     const entry = historyRef.current[historyRef.current.length - historyIndexRef.current]
     // Up 取到历史后，把光标放在开头，符合原输入体验。
     if (entry) restoreHistoryEntry(entry, 'start')
@@ -599,7 +580,7 @@ export function ChatInput({
   const navigateHistoryDown = () => {
     // 没进入历史浏览时 Down 不处理历史。
     if (historyIndexRef.current <= 0) return
-    // 往较新的历史移动一格。
+
     historyIndexRef.current -= 1
     if (historyIndexRef.current === 0) {
       // 回到 0 表示离开历史浏览，要恢复用户原来的草稿。
@@ -627,7 +608,6 @@ export function ChatInput({
    * @returns 如果光标真的移动了返回 true；已经到边界则返回 false。
    */
   const moveCursorVertically = (delta: number): boolean => {
-    // 用换行符拆出逻辑行，Ink 版这里不做终端 cell 宽度换行计算。
     const lines = text.split('\n')
     // line/col 保存当前光标所在逻辑行和列。
     let line = 0
@@ -665,9 +645,7 @@ export function ChatInput({
    * @param override 可选的替代文本；slash 菜单按 Enter 时用它直接提交选中的命令。
    */
   const submitInput = (override?: string) => {
-    // override 用于 slash 菜单：接受候选时直接提交候选文本。
     const raw = override ?? text
-    // 空输入不提交。
     if (!raw.trim()) return
     // spinner 存在说明 agent 正在跑，避免重复提交。
     if (spinner) return
@@ -714,7 +692,6 @@ export function ChatInput({
    * @returns 如果当前按键被选择器消费，返回 true。
    */
   const handleSelectKey = (key: string): boolean => {
-    // 没有选择器弹窗时，告诉外层“我没有消费这个按键”。
     if (!selectRequest) return false
     // 当前高亮选项；freeform 选项会额外启用文本编辑逻辑。
     const option = selectRequest.options[selectIndex]
@@ -793,7 +770,6 @@ export function ChatInput({
    * @param chunk Ink useInput 传入的文本片段。
    */
   const handleTextInput = (chunk: string) => {
-    // Ink 可能传入空字符串；空输入无需处理。
     if (!chunk) return
     if (permission) {
       // 权限弹窗打开时，y/a/n 快捷键直接 resolve，不插入主输入框。
@@ -822,8 +798,7 @@ export function ChatInput({
     setCompletionIndex(0)
   }
 
-  // 直接使用 Ink 的 useInput。本期不做 bracketed paste、自定义 debounce、Alt+Enter/Ctrl+Enter 编码兼容。
-  // usePromptInput 的旧接线保留在 git 历史和当前注释掉的 import 中，后续需要终端兼容增强时可以再接回。
+
   useInput(
     (input, key) => {
       // Ctrl+C 即使 disabled 也必须可用；App 会负责第一次取消、第二次退出。

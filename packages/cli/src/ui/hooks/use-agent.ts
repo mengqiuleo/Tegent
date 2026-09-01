@@ -323,10 +323,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    */
   const submit = useCallback(
     async (text: string, submitOptions?: { silent?: boolean }) => {
-      // 确保记忆和权限规则已经加载；重复调用会被 initialize 内部短路。
       await initialize()
 
-      // 进入 loading：清掉上一轮的 shell 输出和错误，并按 silent 规则决定是否回显用户文本。
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -344,23 +342,18 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
       // 记录本轮是否收到过文本 delta；后面的兜底提取会用它避免重复显示已流式输出的文本。
       let sawTextDelta = false
 
-      // 这组 callbacks 是 CLI 和 core 的主要通信协议：core 不直接碰 UI，只通过这些回调报告事件。
+
       const callbacks: AgentCallbacks = {
-        /** 模型流式吐出文本时，直通追加到当前 assistant 流式消息。 */
         onTextDelta: (delta) => {
           if (delta) {
             sawTextDelta = true
-            // 文本输出会打断“连续读取工具”状态：模型正在写回复时，spinner 应回到 Thinking。
-            // 这里用新旧状态判断，确保读取链后的第一个 delta 才 setState，避免每个 token 都重绘。
             setState((prev) => (prev.bufferingReads ? { ...prev, bufferingReads: false } : prev))
           }
           appendTextDelta(delta)
         },
-        /** core 开始执行工具时，把工具登记为 active。 */
         onToolCall: (toolCallId, toolName, input) => {
-          // 保存工具名、入参和开始时间；工具结果回来时要用它组装 DisplayToolCall 和耗时。
           pendingToolsRef.current.set(toolCallId, { toolName, input, startedAt: Date.now() })
-          // 同步更新粘性读取链：可折叠只读工具延续 Reading，Edit/Write/Shell/Task 等会打断它。
+
           const isReadOnly = isCollapsibleReadOnlyTool(toolName)
           setState((prev) => ({
             ...prev,
@@ -368,35 +361,27 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             bufferingReads: isReadOnly ? true : false,
           }))
         },
-        /** 工具执行中上报进度时，只更新对应 active tool 的 progress 字段。 */
         onToolProgress: (toolCallId, message) => {
           setState((prev) => {
-            // 找不到说明工具已经完成、被取消，或 UI 状态已被清理；直接忽略迟到进度。
             const idx = prev.activeToolCalls.findIndex((t) => t.id === toolCallId)
             if (idx < 0) return prev
-            // 浅拷贝数组和目标项，保持 React state 不可变更新。
             const next = prev.activeToolCalls.slice()
             next[idx] = { ...next[idx], progress: message }
             return { ...prev, activeToolCalls: next }
           })
         },
-        /** 文件编辑工具生成 diff 时先暂存，等工具结果消息出现时再附到 DisplayToolCall。 */
         onFileEdit: (toolCallId, payload) => {
-          // 结构化 patch 会在 onToolResult 被取走并删除，避免同 id 的失败重试继承旧 diff。
           pendingEditDiffsRef.current.set(toolCallId, payload)
         },
-        /** 工具执行结束时，把 live 工具行移除，并把结果固化为一条 scrollback 消息。 */
         onToolResult: (toolCallId, result, isError) => {
-          // 取出并清理 pending 记录；后续即使有迟到回调，也不会重复显示。
           const pending = pendingToolsRef.current.get(toolCallId)
           pendingToolsRef.current.delete(toolCallId)
-          // 取出并清理对应 diff；只有编辑类工具会存在 editPayload。
+
           const editPayload = pendingEditDiffsRef.current.get(toolCallId)
           pendingEditDiffsRef.current.delete(toolCallId)
-          // 根据开始时间计算展示用耗时；没有 pending 时用 0 作为兜底。
           const durationMs = pending ? Date.now() - pending.startedAt : 0
+
           setState((prev) => {
-            // DisplayToolCall 是 UI 层模型，和 core/SDK 的 tool result 格式解耦。
             const tc: DisplayToolCall = {
               id: `tc-${Date.now()}`,
               toolName: pending?.toolName ?? 'unknown',
@@ -408,11 +393,8 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             }
             return {
               ...prev,
-              // 从动态区域移除这个工具。
               activeToolCalls: prev.activeToolCalls.filter((t) => t.id !== toolCallId),
-              // 工具结束后清空 shellOutput，避免下一条 shell 继承旧输出。
               shellOutput: '',
-              // 把工具结果作为 assistant 消息追加到 scrollback；ChatInput 会渲染成工具块。
               messages: [
                 ...prev.messages,
                 {
@@ -429,10 +411,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
         /** core 需要用户授权工具时，把请求排进 UI 队列，并返回一个等待用户选择的 Promise。 */
         onAskPermission: (toolCall) => {
           return new Promise<'yes' | 'always' | 'no'>((resolve) => {
-            // resolver 与 permissionQueue 平行入队；用户点 Yes/No 时 resolvePermission 会取队首。
             permissionResolversRef.current.push(resolve)
-            // MCP 查表：registry 里有未 mangled 的 server + raw tool name，可用于弹窗标题和 always-allow 标签。
-            // 内置工具查不到 registry，mcp 保持 undefined，ChatInput 会走原来的内置工具展示逻辑。
             const mcpEntry = options.mcpRegistry?.get(toolCall.toolName)
             const entry: PendingPermission = {
               toolCallId: toolCall.toolCallId,
@@ -465,7 +444,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             const augmented = [...opts, ...planMeta, OTHER_OPTION]
             setState((prev) => ({
               ...prev,
-              // pendingQuestion 驱动 ChatInput 打开选择器；用户选择后 resolveQuestion 会唤醒这个 Promise。
               pendingQuestion: {
                 question,
                 options: augmented,
@@ -505,25 +483,19 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             }, 0)
           })
         },
-        /** core 内部改变权限模式时，同步 ref 和 UI state。 */
         onPlanModeChange: (mode) => {
           permissionModeRef.current = mode
           setState((prev) => ({ ...prev, permissionMode: mode }))
-          // 模式只作用于当前会话；不写入用户配置。新会话默认 default，除非启动时传了 --plan。
         },
-        /** core 更新 todo 列表时，CLI 只做镜像存储，验证和自动清空语义都在 core 内完成。 */
         onTodosUpdate: (todos) => {
           setState((prev) => ({ ...prev, todos }))
         },
-        /** 子代理事件：把 task 内部的工具调用摘要映射成父工具行的进度文本。 */
         onSubAgentEvent: (event) => {
           if (event.kind === 'tool-call') {
             setState((prev) => {
-              // 子代理事件属于父 task toolCallId；找不到父工具行就忽略。
               const idx = prev.activeToolCalls.findIndex((t) => t.id === event.toolCallId)
               if (idx < 0) return prev
               const tc = prev.activeToolCalls[idx]!
-              // 构造一条简短历史：“工具名: 入参预览”。
               const label = `${event.subToolName}: ${previewSubInput((event.subInput as Record<string, unknown>) ?? {})}`
               const history = [...(tc.subToolHistory ?? []), label]
               const next = prev.activeToolCalls.slice()
@@ -532,7 +504,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             })
           }
           if (event.kind === 'end') {
-            // 子代理结束时把轮数、token 和耗时压缩成一条 Done 状态。
             const turnInfo = `${event.turnCount}t`
             const tokInfo =
               event.tokenUsage.totalTokens > 1000
@@ -543,19 +514,15 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             callbacks.onToolProgress(event.toolCallId, `Done (${turnInfo}, ${tokInfo}, ${durInfo})`)
           }
         },
-        /** shell 工具实时输出；ChatInput 会把 shellOutput 渲染成当前工具的流式输出区域。 */
         onShellOutput: (chunk) => {
           setState((prev) => ({ ...prev, shellOutput: prev.shellOutput + chunk }))
         },
-        /** token 用量更新；直接镜像到 UI state。 */
         onUsageUpdate: (usage) => {
           setState((prev) => ({ ...prev, usage }))
         },
-        /** 自动上下文压缩进度；用来替换 spinner 文案。 */
         onCompressionProgress: (description) => {
           setState((prev) => ({ ...prev, compressionLabel: description }))
         },
-        /** 自动上下文压缩完成；清掉进度标签并把摘要作为命令结果展示。 */
         onContextCompressed: (summary) => {
           setState((prev) => ({ ...prev, compressionLabel: null }))
           appendMessage({
@@ -566,15 +533,10 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             kind: 'command-result',
           })
         },
-        /** core 报错时把错误文本挂到 UI state；submit 的 catch 也会做最终兜底分类。 */
         onError: (error) => {
           setState((prev) => ({ ...prev, error: error.message }))
         },
-        /** 记忆抽取器写入事实后，追加一条轻量提示到 scrollback。 */
         onMemoryWrite: ({ scope, category, key, fact }) => {
-          // 记忆抽取是 fire-and-forget，可能在 submit resolved 后甚至下一轮才回来。
-          // 直接追加到 scrollback，cell-buffer renderer 会像普通 assistant 消息一样插入，
-          // 不会破坏用户此刻正在输入的内容。
           appendMessage({
             id: `mem-${Date.now()}-${key}`,
             role: 'assistant',
@@ -598,8 +560,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
           })
         })
 
-        // 调用 core 的 agentLoop：CLI 提供 content、模型、options、callbacks 和旧 LoopState。
-        // agentLoop 返回 { state, turnCount }；交互式主循环只保存长生命周期 state，turnCount 留给子代理场景。
         const agentResult = await agentLoop(
           content,
           modelRef.current,
@@ -607,19 +567,16 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             ...options,
             modelId: modelIdRef.current,
             thinking: thinkingRef.current,
-            // permissionMode 只有首次 submit 创建 LoopState 时真正生效。
-            // 后续 submit 会沿用 existingState.permissionMode，这里只是保持 options 形状完整。
             permissionMode: permissionModeRef.current,
             abortSignal: controller.signal,
           },
           callbacks,
           loopStateRef.current ?? undefined,
         )
-        // 保存 core 返回的最新 LoopState；下一次用户输入会继续这段会话。
+
         loopStateRef.current = agentResult.state
 
-        // 收尾：如果 provider 没有发文本 delta（例如只流 reasoning，最终文本在 response.messages），
-        // 就从 LoopState 中提取最后一条 assistant 文本，保证用户能看到回复。
+
         if (!sawTextDelta && loopStateRef.current) {
           const fallback = extractLastAssistantText(loopStateRef.current.messages)
           if (fallback) {
@@ -631,7 +588,7 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
             })
           }
         }
-        // 正常结束后清掉所有 pending 工具；迟到结果不应再影响 UI。
+
         pendingToolsRef.current.clear()
         setState((prev) => ({
           ...prev,
@@ -763,18 +720,12 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
       kind: 'command-result',
     })
 
-    // 把中断提示也写入 core 消息历史；下一轮 API 请求才能明确看到上一轮被用户打断。
-    // 如果只显示在 UI，模型可能只看到半截 assistant 消息，然后尝试悄悄续写。
     if (loopStateRef.current) {
       loopStateRef.current.messages.push({ role: 'user', content: noticeText })
-      // 持久化中断：追加 interrupted meta 行，并 flush 未保存尾部（包括刚才 push 的 notice）。
-      // 这是 fire-and-forget，避免因为 FS 错误阻塞用户的取消动作。
       void appendInterrupted(loopStateRef.current)
       void flushPendingMessages(loopStateRef.current)
     }
 
-    // 解除 core 中所有 `await onAskPermission`。
-    // 并行工具会排多个 UI 行，但执行通常按权限门顺序等待；取消时必须把这些门全部拒绝。
     const permResolvers = permissionResolversRef.current
     permissionResolversRef.current = []
     for (const r of permResolvers) r('no')
@@ -784,16 +735,14 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
       current: { resolve: (answer: string) => void; abortAnswer: string } | null
     } = { current: null }
     setState((prev) => {
-      // React updater 内只提取 resolver 信息，不直接调用外部函数。
       const pq = prev.pendingQuestion
       pendingAbortRef.current = pq ? { resolve: pq.resolve, abortAnswer: pq.abortAnswer } : null
       return { ...prev, permissionQueue: [], pendingQuestion: null, bufferingReads: false }
     })
-    // updater 结束后再真正 resolve，保持 React 更新纯净。
+
     const pa = pendingAbortRef.current
     if (pa) pa.resolve(pa.abortAnswer)
 
-    // 最后广播 abort 信号，让底层异步任务开始退出。
     controller.abort()
   }, [appendMessage])
 
@@ -816,7 +765,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    * @returns 会话 id、slug、消息数量和首条用户提示预览；无会话时为 null。
    */
   const getSessionInfo = useCallback(() => {
-    // LoopState 是 core 侧权威会话对象；没有它就没有可恢复内容。
     const ls = loopStateRef.current
     if (!ls || ls.messages.length === 0) return null
     // 用第一条 user 消息生成退出提示里的任务预览。
@@ -829,12 +777,9 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    * 清空当前对话，但保留当前模型和权限模式。
    */
   const clear = useCallback(() => {
-    // 清掉 core 会话；下一次 submit 会创建新的 LoopState。
     loopStateRef.current = null
-    // 清掉所有未完成工具和权限 resolver，避免旧会话的异步回调影响新会话。
     pendingToolsRef.current.clear()
     permissionResolversRef.current = []
-    // /clear 只清对话，不清会话级设置；用户刚选的模型和 plan/default 模式应保留。
     setState((prev) => ({ ...initialState, modelId: prev.modelId, permissionMode: prev.permissionMode }))
   }, [])
 
@@ -852,15 +797,11 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    */
   const resume = useCallback(
     (loaded: LoadedSession) => {
-      // 旧会话的 pending 工具不能带进恢复后的会话。
       pendingToolsRef.current.clear()
-      // hydrate 后的 LoopState 保留 sessionId/taskSlug，从而继续写同一个 jsonl。
       loopStateRef.current = hydrateLoopState(loaded, permissionModeRef.current)
-      // core 消息模型转换为 CLI 展示模型。
       const converted = modelMessagesToDisplay(loaded.messages)
       setState((prev) => ({
         ...prev,
-        // 清理旧会话的瞬态 UI 状态。
         activeToolCalls: [],
         shellOutput: '',
         error: null,
@@ -905,31 +846,25 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
     async (
       ckptId: string,
     ): Promise<{ ok: true; preview: string; messageCount: number } | { ok: false; reason: string }> => {
-      // 必须有当前 LoopState 才能知道 checkpoints 和会话历史。
       const ls = loopStateRef.current
       if (!ls) return { ok: false, reason: 'No active session to rewind.' }
-      // 拒绝在一轮执行中回滚：写工具可能正在并发修改磁盘，强行回滚容易得到半恢复状态。
       if (state.isLoading) {
         return { ok: false, reason: 'A turn is in progress. Press Esc to cancel it, then run /rewind.' }
       }
-      // 找到目标 checkpoint；找不到就返回可显示错误。
+
       const target = ls.checkpoints.find((c) => c.ckptId === ckptId)
       if (!target) return { ok: false, reason: `Checkpoint not found: ${ckptId}` }
 
-      // 恢复工作区，并把 checkpoint 列表原地修剪到目标前缀。
-      // restoreCheckpoint 失败时直接返回错误，不掩盖潜在的部分恢复问题。
+
       const ok = await restoreCheckpoint(ls, ckptId)
       if (!ok) {
         return { ok: false, reason: 'Failed to read checkpoint manifest — backups may have been cleaned up.' }
       }
 
-      // 丢掉触发该快照的用户消息，以及之后模型产生的 assistant/tool 条目。
       const newLen = Math.max(0, target.messageCount - 1)
       ls.messages = ls.messages.slice(0, newLen)
       ls.persistedMessageCount = ls.messages.length
 
-      // markBoundaryAndReflush 会写 compact-boundary 并重刷截断后的消息。
-      // 它也会按压缩语义清空 checkpoints，所以先保存 surviving prefix，重刷后再逐条写回。
       const survivingCheckpoints = ls.checkpoints.slice()
       await markBoundaryAndReflush(ls)
       ls.checkpoints = survivingCheckpoints
@@ -937,7 +872,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
         await appendCheckpoint(ls, c)
       }
 
-      // 用截断后的会话重建 UI messages。长度变短会触发 ChatInput 清屏重绘，视觉语义类似 /clear。
       pendingToolsRef.current.clear()
       const converted = modelMessagesToDisplay(ls.messages)
       setState((prev) => ({
@@ -961,18 +895,15 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    * @returns 压缩前后 token 数；无会话或消息过少时返回 null。
    */
   const compact = useCallback(async (onProgress?: (description: string) => void) => {
-    // 没有会话就没有可压缩的消息。
     if (!loopStateRef.current) return null
-    // 动态 import 避免把估算工具提前拉进 CLI 初始路径。
     const { estimateTokenCount, KEEP_RECENT } = await import('@tegent/core')
-    // 消息数量不超过保留窗口时无需压缩。
     if (loopStateRef.current.messages.length <= KEEP_RECENT) return null
-    // 估算压缩前 token，方便用户看到压缩效果。
+
     const before = estimateTokenCount(loopStateRef.current.messages)
     onProgress?.('Summarizing conversation...')
-    // core 负责真正摘要；这里直接替换 LoopState.messages。
+
     loopStateRef.current.messages = await compressMessages(loopStateRef.current.messages, modelRef.current)
-    // 估算压缩后 token，并返回前后对比。
+
     const after = estimateTokenCount(loopStateRef.current.messages)
     return { beforeTokens: before, afterTokens: after }
   }, [])
@@ -984,7 +915,6 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    * @param newModel 新模型实例，用于下一轮 agentLoop 调用。
    */
   const switchModel = useCallback((newModelId: string, newModel: LanguageModel) => {
-    // ref 给业务逻辑读；state.modelId 给 UI 重绘。
     modelRef.current = newModel
     modelIdRef.current = newModelId
     setState((prev) => ({ ...prev, modelId: newModelId }))
@@ -1032,17 +962,14 @@ export function useAgent(initialModel: LanguageModel, options: AgentOptions) {
    * @param next 目标权限模式。
    */
   const setPermissionMode = useCallback((next: PermissionMode) => {
-    // 目标模式没变时不用触发任何 state 更新。
     if (permissionModeRef.current === next) return
     permissionModeRef.current = next
     if (loopStateRef.current) {
       loopStateRef.current.permissionMode = next
       loopStateRef.current.systemPromptCache = null
-      // 离开 plan 模式时清掉当前 plan 文件路径。
-      // 以后重新进入 plan 时，agentLoop/enterPlanMode 会基于新的用户消息懒生成 fresh slug。
       if (next !== 'plan') loopStateRef.current.currentPlanPath = null
     }
-    // 镜像到 React state，让底部权限模式指示器立即重绘。
+
     setState((prev) => ({ ...prev, permissionMode: next }))
   }, [])
 

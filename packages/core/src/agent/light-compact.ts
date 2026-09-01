@@ -10,7 +10,6 @@
 // 调用方应在调用 LLM 摘要器之前先运行这里，让摘要器处理更有信号密度的剩余消息。
 import type { ModelMessage } from 'ai'
 
-// 中文导读：
 // 这里是“不调用模型”的轻量上下文瘦身层。它只删除或替换明显低价值的历史：
 // loop-guard 已经阻断过的重复工具调用，以及老旧的大型 tool_result。
 // 目标是在不破坏消息结构的前提下尽量延后真正的 LLM 摘要压缩。
@@ -18,7 +17,6 @@ import type { ModelMessage } from 'ai'
 /** 一看到就应删除的 tool-result 内容前缀。 */
 const LOOP_GUARD_SENTINEL = '[loop-guard]'
 
-// 这是一个“只关心本文件会用到哪些字段”的局部类型。
 // SDK 里的 tool-result part 类型比较宽，这里不需要完整建模，只取 type/toolCallId/output。
 type ToolResultPartLike = {
   // part 类型，例如 `tool-result`、`tool-call`、`text` 等；这里用可选是为了容忍未知结构。
@@ -33,35 +31,27 @@ type ToolResultPartLike = {
 
 // 判断一个 tool-result part 是不是“可以直接删除”的目标。
 function isToolResultDropTarget(part: ToolResultPartLike): boolean {
-  // 目前只删除 loop-guard 合成结果；其它工具结果即使失败也可能含有诊断价值。
   if (part?.type !== 'tool-result') return false
 
-  // tool-result 没有 output 时，无法判断它是不是 loop-guard 结果，因此不删。
   const output = part.output
   if (!output) return false
 
   // 只有纯文本输出才检查前缀；非文本输出可能是结构化数据，保守保留。
   if (output.type === 'text' && typeof output.value === 'string') {
-    // loop guard 生成的提醒以固定前缀开头；遇到它说明这次工具调用已被阻断。
     return output.value.startsWith(LOOP_GUARD_SENTINEL)
   }
 
-  // 不是文本输出，或者 value 不是字符串，都不属于本轮轻量删除目标。
   return false
 }
 
 // 判断整条消息里是否包含应删除的 loop-guard tool-result。
 function hasDropTargetResult(msg: ModelMessage): boolean {
-  // 只有 role=tool 的消息才会承载 tool-result；其它角色直接跳过。
   if (msg.role !== 'tool') return false
 
-  // ModelMessage.content 类型较宽，这里先按本文件关心的 part 数组形状看待。
   const parts = msg.content as unknown as ToolResultPartLike[]
 
-  // 如果 content 不是数组，说明不是多 part 工具结果格式，保守不删。
   if (!Array.isArray(parts)) return false
 
-  // 只要有任意一个 part 是 drop target，这整条 tool 消息就会被删除。
   return parts.some(isToolResultDropTarget)
 }
 
@@ -109,31 +99,22 @@ function stripToolCallParts(msg: ModelMessage, idsToRemove: Set<string>): ModelM
 
 /** 收集那些 tool-result 是 loop-guard 提醒的 toolCallId。 */
 function collectLoopGuardedIds(messages: ModelMessage[]): Set<string> {
-  // 先收集要删的 toolCallId，再统一处理 assistant/tool 两侧。
-  // Set 可以去重：同一个 id 即使出现多次，也只记录一次。
   const ids = new Set<string>()
 
-  // 扫描全部历史消息，找到所有 loop-guard tool-result。
   for (const msg of messages) {
-    // 只有 tool 消息会包含 tool-result。
     if (msg.role !== 'tool') continue
 
-    // 将 content 临时视为工具结果 part 数组。
     const parts = msg.content as unknown as ToolResultPartLike[]
 
-    // 不是数组就没有可扫描的 part。
     if (!Array.isArray(parts)) continue
 
-    // 一条 tool 消息里可能包含多个 result part，所以逐个检查。
     for (const part of parts) {
-      // 如果这个 part 是 loop-guard 结果，并且带有 toolCallId，就记录它。
       if (isToolResultDropTarget(part) && typeof part.toolCallId === 'string') {
         ids.add(part.toolCallId)
       }
     }
   }
 
-  // 返回所有需要从 assistant/tool 两侧一起删除的 toolCallId。
   return ids
 }
 
@@ -151,40 +132,29 @@ export interface LightCompactResult {
  * lightCompactMessages：删除已经被 loop-guard 阻断的工具调用记录。也就是 assistant 发起的 tool-call 和对应的 [loop-guard] tool-result 一起删掉，避免历史里留下没意义的失败循环。
  */
 export function lightCompactMessages(messages: ModelMessage[]): LightCompactResult {
-  // 第一步先找出所有 loop-guard tool-result 对应的 toolCallId。
   const idsToRemove = collectLoopGuardedIds(messages)
-
-  // 没找到要删的 id，说明这次轻量压缩没事可做，直接返回原数组。
   if (idsToRemove.size === 0) return { messages, dropped: 0 }
 
-  // 返回新数组，不改输入；调用方可以根据 dropped 决定是否替换 state.messages。
   const out: ModelMessage[] = []
 
-  // dropped 统计删掉了多少条完整消息，不统计 assistant 消息里被删掉的单个 part。
   let dropped = 0
 
-  // 逐条扫描原始消息，决定保留、部分修改，还是整条删除。
   for (const msg of messages) {
-    // 如果这条 tool 消息本身就是 loop-guard 结果，整条删掉。
     if (hasDropTargetResult(msg)) {
       dropped++
       continue
     }
 
-    // 如果是 assistant 消息，则删除里面和 loop-guard result 配对的 tool-call part。
     const stripped = stripToolCallParts(msg, idsToRemove)
 
-    // stripped 为 null 表示这条 assistant 消息删完 tool-call 后已经空了，可以整条丢弃。
     if (stripped == null) {
       dropped++
       continue
     }
 
-    // 普通消息、无需修改的 assistant、或过滤后仍有内容的 assistant，都会进入输出数组。
     out.push(stripped)
   }
 
-  // 返回轻量压缩后的消息和删除统计。
   return { messages: out, dropped }
 }
 
@@ -226,17 +196,12 @@ const PREVIEW_LINES = 3
 
 // 把一段很长的工具输出替换成短说明，保留元数据和开头预览。
 function buildStub(toolName: string | undefined, value: string): string {
-  // stub 保留输出规模和少量预览，让模型知道曾经跑过什么，也知道需要时可以重跑。
-  // 统计原输出行数，写入 stub，帮助模型判断这次输出规模有多大。
   const lineCount = value.split('\n').length
 
-  // 取原输出前几行作为预览，避免完全丢失工具结果的形状。
   const preview = value.split('\n').slice(0, PREVIEW_LINES).join('\n')
 
-  // toolName 可能缺失；缺失时用 unknown，避免 stub 里出现 undefined。
   const name = toolName ?? 'unknown'
 
-  // 第一行说明这是截断结果、原输出规模和恢复方式；后面拼少量原文预览。
   return (
     `[Truncated: ${name} output — ${lineCount} lines, ${value.length} chars. ` +
     `Content removed to save context. Re-run the tool if you need the full output.]\n` +
@@ -272,55 +237,35 @@ export function truncateOldToolResults(messages: ModelMessage[]): TruncateOldToo
   // 统计截断前后字符串长度差；只是估算，不等于真实 token 数。
   let charsSaved = 0
 
-  // 只遍历旧消息区间；最近 KEEP_RECENT_MESSAGES 条完全不动。
   for (let i = 0; i < protectedStart; i++) {
-    // 取出当前要检查的消息。
     const msg = messages[i]
 
-    // 理论上 msg 存在；这里保守防御 undefined。
     if (!msg || msg.role !== 'tool') continue
 
-    // 只有数组 content 才可能包含多个 tool-result part。
     if (!Array.isArray(msg.content)) continue
 
-    // 一条 tool 消息中可能有多个结果 part，所以逐个处理。
     for (const part of msg.content as unknown as ToolResultPartLike[]) {
-      // 只截断 tool-result；其它 part 类型不属于工具输出。
       if (part?.type !== 'tool-result') continue
 
-      // 没有 output 就没有文本可截断。
       const output = part.output
       if (!output) continue
 
-      // 某些 SDK part 会带 toolName；类型里没有完整声明，所以这里局部取一下。
       const toolName = (part as { toolName?: string }).toolName
 
       // 决策类或本来很短的工具永远不截断，避免丢掉关键状态。
       if (toolName && NEVER_TRUNCATE_TOOLS.has(toolName)) continue
 
-      // 目前只截断文本输出；结构化或二进制输出保守保留。
       if (output.type === 'text' && typeof output.value === 'string') {
-        // 小于阈值的文本不值得截断，stub 可能还比原文占地方。
         if (output.value.length < MIN_TRUNCATABLE_CHARS) continue
-
-        // 已经截断过的内容不要重复截断，否则会套娃，预览也会越来越无意义。
         if (output.value.startsWith('[Truncated:')) continue
 
-        // 保存原始文本，用于计算节省字符数和生成 stub。
         const original = output.value
-
-        // 直接修改 part.output.value，把长文本替换成短 stub。
         output.value = buildStub(toolName, original)
-
-        // 更新节省字符数统计。
         charsSaved += original.length - (output.value as string).length
-
-        // 更新实际截断数量统计。
         truncatedCount++
       }
     }
   }
 
-  // 返回原 messages 引用和统计信息；调用方会根据统计决定是否继续做更重的压缩。
   return { messages, truncatedCount, charsSaved }
 }

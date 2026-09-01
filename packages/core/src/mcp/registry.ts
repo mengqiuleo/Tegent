@@ -96,7 +96,6 @@ export class McpRegistry {
     return this.servers.get(r.serverName)?.client
   }
 
-  // ── 服务器状态面（供 /mcp list / status 使用） ───────────────────────
 
   serverStatus(): Array<{ name: string; status: McpServerStatus; stderrTail?: string }> {
     return [...this.servers.values()].map((s) => ({
@@ -116,7 +115,6 @@ export class McpRegistry {
     return this.configs.get(serverName)
   }
 
-  // ── 分发 ─────────────────────────────────────────────────────────────
 
   /** 按模型侧 callableName 调用一个 MCP 工具。
    *
@@ -130,7 +128,6 @@ export class McpRegistry {
     return server.client.callTool(entry.rawName, args, signal)
   }
 
-  // ── 生命周期 ──────────────────────────────────────────────────────────
 
   /**
    * 干净断开所有服务器。
@@ -150,7 +147,6 @@ export class McpRegistry {
     await Promise.allSettled(tasks)
   }
 
-  // ── 重启 / 刷新 ───────────────────────────────────────────────────────
 
   /**
    * 用当前配置就地重连一个服务器。
@@ -253,7 +249,6 @@ export class McpRegistry {
     return summary
   }
 
-  // ── 内部实现 ──────────────────────────────────────────────────────────
 
   /** 删除某个服务器拥有的所有工具和 resource。幂等。 */
   private removeServerEntries(name: string): void {
@@ -298,7 +293,6 @@ export function emptyRegistry(): McpRegistry {
   return new McpRegistry({ servers: [], tools: [], resources: [] })
 }
 
-// ── 连接辅助（与 loader.ts 在初始启动时共享） ─────────────────────────
 
 /**
  * 单台服务器“连接 + 枚举”的输出。

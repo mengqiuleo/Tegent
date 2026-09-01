@@ -1,7 +1,6 @@
 // CLI 启动时由 [[loader]].loadAllPlugins() 构建一次，然后在当前会话中作为
 // 长生命周期对象使用。注册表保存所有成功加载的插件，包括已启用和已禁用的，
-// 这样 `/plugin list` 才能展示完整状态；同时也保存加载错误，供
-// `/plugin doctor` 展示。
+// 这样 `/plugin list` 才能展示完整状态；同时也保存加载错误，供 `/plugin doctor` 展示。
 //
 // 热刷新模型和 SkillRegistry 一致：`/plugin refresh` 会原地替换内部状态，
 // 保持 PluginRegistry 对象本身的 identity 不变，确保所有已捕获的

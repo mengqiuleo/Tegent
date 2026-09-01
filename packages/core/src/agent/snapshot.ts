@@ -271,53 +271,37 @@ export async function createCheckpoint(
     }
 
     try {
-      // 读取文件当前内容。这里读到的是“本轮用户输入刚进入后、下一批工具运行前”的状态。
       const buf = await fs.readFile(absPath)
-
-      // 用内容 hash 作为 blob id，实现跨 checkpoint 去重。
       const hash = createHash('sha256').update(buf).digest('hex')
 
-      // 如果相同内容之前已经保存过，这里不会重复写。
       await writeBlobIfMissing(state.sessionId, hash, buf, cwd)
 
-      // manifest 只保存 hash 指针，不直接嵌入文件内容。
       files[absPath] = { hash }
     } catch {
-      // 文件可能在 stat 后被其它进程删除/锁定。不能安全捕获时，保守标记 skip。
       files[absPath] = { skip: true }
     }
   }
 
-  // manifest 是“这个 checkpoint 到底捕获了什么”的完整账本。
   const manifest: Manifest = {
     ckptId,
     ts,
     messageCount,
-    // 只保留前 200 字符，避免很长的用户输入把 manifest/session jsonl 撑大。
     userPrompt: userPromptPreview.slice(0, 200),
     files,
   }
 
   try {
-    // 第一次创建 checkpoint 时，checkpoints 目录可能不存在。
     await fs.mkdir(checkpointsDir(state.sessionId, cwd), { recursive: true })
 
-    // manifest 写入成功，才算 checkpoint 可用。
     await fs.writeFile(manifestPath(state.sessionId, ckptId, cwd), JSON.stringify(manifest, null, 2), 'utf-8')
   } catch {
-    // manifest 如果写不出来，就不能返回半成品 checkpoint。
-    // 调用方会认为本轮 rewind 点不可用，但主流程继续运行。
     return null
   }
 
-  // 内存里只放 picker 和 restore 需要的轻量索引。
   const entry: CheckpointEntry = { ckptId, messageCount, ts, userPrompt: manifest.userPrompt }
 
-  // 追加到当前 LoopState；appendCheckpoint 会再把这个 entry 镜像到 session jsonl。
   state.checkpoints.push(entry)
 
-  // 环形缓冲淘汰：删除最旧 manifest。
-  // blob GC 延迟到下面的摊销 sweep，避免每次淘汰都重读剩余 manifest。
   let evicted = false
 
   // 最多保留最近 MAX_CHECKPOINTS 个 rewind 点，避免长期会话无限占磁盘。
@@ -325,25 +309,17 @@ export async function createCheckpoint(
     // 从队头淘汰最旧 checkpoint，因为 checkpoints 按创建顺序 append。
     const dropped = state.checkpoints.shift()
 
-    // 理论上 length > MAX_CHECKPOINTS 时一定有 dropped；这里防御性处理。
     if (!dropped) break
 
-    // 删除被淘汰 checkpoint 的 manifest。失败不影响当前 checkpoint 可用性。
     void fs.unlink(manifestPath(state.sessionId, dropped.ckptId, cwd)).catch(() => undefined)
 
-    // 标记发生过淘汰，后面需要清理可能已经无人引用的 blob。
     evicted = true
   }
 
   if (evicted) {
-    // 这里 await，而不是 fire-and-forget，主要为了测试里 blob 数量可预测；
-    // 也避免下一次淘汰和仍在运行的 sweep 竞态，误删新 manifest 仍引用的 blob。
-    // GC 复杂度是 O(剩余 checkpoint * 每个 manifest 的文件数)，最多几百次读取，
-    // 摊到上百次普通 checkpoint 之间，成本可接受。
     await garbageCollectBlobs(state, cwd).catch(() => undefined)
   }
 
-  // 返回轻量 entry，调用方可以把它写进 session jsonl。
   return entry
 }
 
@@ -370,7 +346,6 @@ export async function restoreCheckpoint(
   ckptId: string,
   cwd: string = process.cwd(),
 ): Promise<boolean> {
-  // 先读取目标 checkpoint 的 manifest。读不到说明这个 rewind 点不可用。
   let raw: string
   try {
     raw = await fs.readFile(manifestPath(state.sessionId, ckptId, cwd), 'utf-8')
@@ -378,7 +353,6 @@ export async function restoreCheckpoint(
     return false
   }
 
-  // manifest 是 JSON 文件；解析失败也不能继续恢复，避免按错误账本改工作区。
   let manifest: Manifest
   try {
     manifest = JSON.parse(raw) as Manifest
@@ -392,71 +366,51 @@ export async function restoreCheckpoint(
   // 用并集是为了能删除“checkpoint 之后新建”的文件，也能恢复“当时存在、现在不在集合里”的文件。
   const allFiles = new Set<string>([...state.filesModified, ...Object.keys(manifest.files)])
 
-  // 逐个文件恢复到 manifest 描述的状态。
   for (const absPath of allFiles) {
-    // entry 不存在表示：这个文件在目标 checkpoint 当时还没被跟踪。
     const entry = manifest.files[absPath]
 
     if (!entry) {
-      // 这是 checkpoint 之后某一轮新建的文件，删除它即可回滚。
       await fs.unlink(absPath).catch(() => undefined)
       continue
     }
 
-    // 当时无法安全捕获的文件，现在也不要动；这是保守恢复策略。
     if (entry.skip) continue
 
     if (entry.absent) {
-      // 目标状态是“不存在”，所以当前如果存在就删除。unlink 失败通常表示本来就不存在或无权限。
       await fs.unlink(absPath).catch(() => undefined)
       continue
     }
 
     if (entry.hash) {
       try {
-        // 根据 manifest 中的 hash 找到当时保存的文件内容。
         const buf = await fs.readFile(blobPath(state.sessionId, entry.hash, cwd))
 
-        // 如果文件所在目录后来被删了，恢复前需要重新创建父目录。
         await fs.mkdir(path.dirname(absPath), { recursive: true })
 
-        // 把 blob 内容写回原绝对路径。
         await fs.writeFile(absPath, buf)
       } catch {
-        // blob 缺失时无法恢复这个文件。不要让整个 rewind 失败；
-        // 恢复其它文件仍比把全部文件留在半新半旧状态更好。
       }
     }
   }
 
-  // 从 manifest 重建 filesModified，让后续 checkpoint 覆盖正确集合。
-  // absent/skip 项也要保留：这些文件历史上被 agent 碰过，仍应在跟踪范围内。
   state.filesModified.clear()
 
-  // 恢复后，agent 的“已触碰文件集合”应等于目标 checkpoint 的账本。
   for (const absPath of Object.keys(manifest.files)) {
     state.filesModified.add(absPath)
   }
 
-  // 删除目标 checkpoint 之后的 checkpoint；目标本身保留。
-  // 用户现在已经“站在”目标点上，仍可以再次 rewind 到它。
   const cutoffIndex = state.checkpoints.findIndex((c) => c.ckptId === ckptId)
 
-  // 如果内存里找得到目标 checkpoint，就把它之后的未来历史全部丢掉。
   if (cutoffIndex >= 0) {
-    // splice 返回被删除的 checkpoint entry，后面要同步删除它们的 manifest 文件。
     const dropped = state.checkpoints.splice(cutoffIndex + 1)
 
     for (const d of dropped) {
-      // 删除未来 checkpoint 的 manifest。失败不影响当前已完成的工作区恢复。
       void fs.unlink(manifestPath(state.sessionId, d.ckptId, cwd)).catch(() => undefined)
     }
   }
 
-  // 删除未来 checkpoint 后，部分 blob 可能已经没人引用，需要清理。
   await garbageCollectBlobs(state, cwd).catch(() => undefined)
 
-  // 返回 true 表示 manifest 可读且恢复流程已经执行完。
   return true
 }
 
@@ -465,38 +419,28 @@ export async function restoreCheckpoint(
  * 成本很低：读取剩余 checkpoint * 每个 manifest 的文件数，再做一次 readdir。
  * 只在 eviction 和 restore 后运行，因为只有这两条路径会制造孤儿 blob。 */
 async function garbageCollectBlobs(state: LoopState, cwd: string): Promise<void> {
-  // 收集仍被保留 checkpoint 引用的所有 blob hash。
   const referenced = new Set<string>()
 
-  // 逐个读取剩余 checkpoint 的 manifest。
   for (const ckpt of state.checkpoints) {
     try {
-      // manifest 里保存了每个文件对应的 hash/absent/skip。
       const raw = await fs.readFile(manifestPath(state.sessionId, ckpt.ckptId, cwd), 'utf-8')
 
-      // 这里信任内部写出的 JSON；坏文件会被 catch 跳过。
       const m = JSON.parse(raw) as Manifest
 
-      // 只有 hash 项引用 blob；absent/skip 不引用任何内容文件。
       for (const entry of Object.values(m.files)) {
         if (entry.hash) referenced.add(entry.hash)
       }
     } catch {
-      // manifest 已消失或不可读：跳过。
-      // 它引用的 blob 会和其它未引用 blob 一起成为回收候选。
     }
   }
 
-  // 读取当前 blob 目录下的所有 blob 文件名，也就是所有已保存的 hash。
   let names: string[]
   try {
     names = await fs.readdir(blobsDir(state.sessionId, cwd))
   } catch {
-    // blob 目录不存在时没有东西可清理。
     return
   }
 
-  // 删除没有被任何剩余 manifest 引用的 blob。
   for (const name of names) {
     if (!referenced.has(name)) {
       await fs.unlink(blobPath(state.sessionId, name, cwd)).catch(() => undefined)

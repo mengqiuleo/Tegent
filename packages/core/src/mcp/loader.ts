@@ -1,5 +1,5 @@
-// 这是 CLI 入口调用的一次性编排流程：读取用户级和项目级配置，
-// 对项目级内容执行信任门校验，展开环境变量，并行启动 / 连接
+// 读取用户级和项目级配置，
+// 对项目级内容执行信任校验，展开环境变量，并行启动 / 连接
 // 每个启用的服务器，最后构建一个 registry，供后续 `/mcp refresh`
 // 继续修改。单个服务器失败不会阻止整个启动，
 // `/mcp list` 会把失败原因展示给用户。
@@ -20,7 +20,7 @@ import {
 import { type TrustChoice, buildServerPreview, isProjectTrusted, promptForTrust, trustProject } from './trust.js'
 import { type McpResourceEntry, type McpServerConfig, type McpToolEntry } from './types.js'
 
-// 为历史调用方重新导出这些类型，避免旧 import 失效。
+
 export type { RegisteredServer, ConnectResult }
 export type { McpResourceEntry, McpToolEntry }
 
@@ -124,8 +124,6 @@ export async function loadMergedConfigsFromDisk(opts: {
         projectServersToUse,
       )
       if (choice === 'exit') {
-        // /mcp refresh 故意忽略 'exit'：从 slash command 直接把整个 CLI 退掉
-        // 太激进了，这里把它视作 'skip'，让用户在真正重启时再决定。
         projectServersToUse = {}
         projectSkipped = true
       } else if (choice === 'skip') {
@@ -195,7 +193,6 @@ export async function loadMcpServers(options: LoadOptions): Promise<LoadResult> 
     ...projectServersToUse,
   }
 
-  // 任意地方都没有配置服务器时，直接走空 registry 快速路径。
   if (Object.keys(merged).length === 0) {
     return {
       registry: new McpRegistry({ servers: [], tools: [], resources: [] }),

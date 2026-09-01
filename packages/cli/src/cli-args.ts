@@ -1,13 +1,8 @@
+// --version / --help 两个标准
+import yargs from 'yargs' 
+import { hideBin } from 'yargs/helpers' 
 
-// 这个文件从入口文件中拆出来，是为了让参数解析逻辑不把 index.ts 里的
-// 启动编排逻辑挤得太长。CLI 不提供任何配置类 flag——模型、plan 模式、
-// 插件、会话恢复等全部在进入交互模式后，通过 /model、/plan、/plugin、
-// /resume 等斜杠命令自行配置。这里只保留 --version / --help 两个标准
-// 入口；多余的位置参数会被直接忽略。
-import yargs from 'yargs' // 引入 yargs，用于声明和解析命令行参数。
-import { hideBin } from 'yargs/helpers' // 引入 hideBin，用于去掉 node 路径和脚本路径这两个前置参数。
-
-import { VERSION } from './version.js' // 引入当前 CLI 版本号，用于 `--version` 输出。
+import { VERSION } from './version.js' 
 
 /**
  * 解析当前进程的 CLI 参数。
@@ -21,18 +16,11 @@ import { VERSION } from './version.js' // 引入当前 CLI 版本号，用于 `-
 export async function parseCliArgs() {
   // 使用 hideBin(process.argv) 取得真正由用户输入的参数。
   return yargs(hideBin(process.argv))
-    // 设置帮助信息里显示的命令名。
     .scriptName('tegent')
-    // 设置命令用法；CLI 不接收任何位置参数。
     .usage('$0')
-    // 注册 `--version` 输出，内容来自当前包版本。
     .version(VERSION)
-    // 给 `--version` 增加短别名 -v。
     .alias('v', 'version')
-    // 注册 `--help` 输出。
     .help()
-    // 给 `--help` 增加短别名 -h。
     .alias('h', 'help')
-    // 执行解析并返回 argv；因为函数是 async，返回值会被 Promise 包裹。
     .parse()
 }

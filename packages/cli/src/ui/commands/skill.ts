@@ -89,7 +89,7 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
 
       addCommandMessage(
         text,
-        `Skill **${name}** installed to \`${skillFile}\`\nRun \`/skill refresh\` to use \`/${name}\` now, or restart xc.`,
+        `Skill **${name}** installed to \`${skillFile}\`\nRun \`/skill refresh\` to use \`/${name}\` now, or restart tegent.`,
       )
       return
     }
@@ -209,13 +209,13 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
             otherScopeNote = `\n_Note: \`${bareName}\` is also listed in ${other} settings (\`${skillSettingsPath(other)}\`). Run \`/skill enable ${bareName} --scope=${other}\` to fully re-enable._`
           }
         } catch {
-          // 尽力而为的提示 —— 静默失败即可
+
         }
       }
       const verb = disable ? 'Disabled' : 'Enabled'
       addCommandMessage(
         text,
-        `${verb} skill **${bareName}** in ${effectiveScope} settings (\`${settingsFile}\`).${otherScopeNote}\nRun \`/skill refresh\` to apply now, or restart xc.`,
+        `${verb} skill **${bareName}** in ${effectiveScope} settings (\`${settingsFile}\`).${otherScopeNote}\nRun \`/skill refresh\` to apply now, or restart tegent.`,
       )
       return
     }
@@ -257,11 +257,11 @@ export function createSkillCommandHandler(deps: SkillCommandDeps) {
         await setSkillDisabled(name, 'user', false)
         await setSkillDisabled(name, 'project', false)
       } catch {
-        // 尽力而为 —— 主删除操作已成功
+
       }
       addCommandMessage(
         text,
-        `Uninstalled skill **${name}** from \`${skillDir}\`.\nRun \`/skill refresh\` to apply now, or restart xc.`,
+        `Uninstalled skill **${name}** from \`${skillDir}\`.\nRun \`/skill refresh\` to apply now, or restart tegent.`,
       )
       return
     }

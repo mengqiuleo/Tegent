@@ -110,7 +110,6 @@ export async function executeHook(
     })
 
     if (opts.signal?.aborted) {
-      // 执行期间被取消。调用方 loop 已经在收尾，继续抛出可以让总线停止级联执行后续 hook。
       throw new Error('aborted')
     }
 
@@ -227,7 +226,7 @@ function parseDecision(stdout: string, hook: RegisteredHook, event: HookEvent): 
       }
     }
   } catch {
-    // 不是 JSON。很多 hook 会把 stdout 当成人类可读日志使用，所以这里默认 allow；
+
   }
   return { decision: 'allow' }
 }

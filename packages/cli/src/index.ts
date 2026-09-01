@@ -54,15 +54,11 @@ let shutdownInProgress = false //  声明退出状态标记，false 表示当前
 let mcpRegistryForShutdown: McpRegistry | null = null // 声明退出时要用的 MCP 注册表引用，初始为 null 表示还没加载。
 let hookBusForShutdown: HookBus | null = null // 声明退出时要用的插件钩子总线引用，初始为 null 表示还没准备好。
 
-//  「双保险」式的终端状态恢复。在退出前同步执行，
-// 这样即使 Ink 的卸载过程部分失败（比如某个 useEffect 清理函数抛错、
-// 或者长会话里 raw 模式的引用计数泄漏），终端仍能保持可用状态。
-// 这个函数可以安全地多次调用——每一条转义序列都是幂等的（重复执行效果不变）。
-//  定义终端恢复函数，退出前把颜色、光标、raw 模式等恢复正常。
+
 function resetTerminal(): void {
   //  如果 stdout 不是真实终端，就不用写终端控制序列，直接返回。
   if (!process.stdout.isTTY) return
-  //  开始 try 块；这里包住可能因为终端断开而失败的操作。
+
   try {
     //  同步写入重置样式的 ANSI 转义序列，防止 shell 提示符继承颜色或粗体。
     fs.writeSync(1, '\x1b[0m') // reset SGR (colors, bold, inverse, ...) so the shell prompt isn't styled

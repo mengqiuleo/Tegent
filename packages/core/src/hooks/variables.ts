@@ -46,8 +46,7 @@ export function buildVariableContext(input: { pluginDir: string; cwd: string; pl
     try {
       fs.mkdirSync(dataDir, { recursive: true })
     } catch {
-      // mkdir 失败（权限、磁盘空间等）时保留缺失目录，让插件脚本在真正写入时得到
-      // 清晰的 shell 错误。这里抛错会卡住 hook 执行路径，收益反而更低。
+
     }
   }
   return {

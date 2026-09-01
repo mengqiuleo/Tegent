@@ -2,8 +2,6 @@
 // 并为每个 plugin id 解析出最终生效的启用状态。
 // 并提供功能函数：改写 settings.json 中的单个插件启用标记，或启用后将单个插件记录从 settings.json 中清理掉。
 //
-// 当前是两级作用域模型，和 MCP、skill 子系统保持一致：
-//
 //   user     ~/.tegent/settings.json
 //   project  <cwd>/.tegent/settings.local.json   （被 git 忽略）
 //
@@ -14,9 +12,6 @@
 // 映射形状是 `{ "name@marketplace": true | false }`：
 // true 表示显式启用，false 表示显式禁用，缺失表示使用项目级默认值。
 // 当前默认值是 `true`，也就是安装后的插件默认可用。
-//
-// 优先级：project > user。高优先级作用域只要出现显式值就直接胜出；
-// 如果没有记录，则继续向低优先级作用域回退。
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -68,8 +63,6 @@ async function readSettings(scope: PluginScope, cwd: string): Promise<PluginSett
     if (!parsed || typeof parsed !== 'object') return {}
     const obj = parsed as Record<string, unknown>
     if (obj.enabledPlugins && typeof obj.enabledPlugins === 'object' && !Array.isArray(obj.enabledPlugins)) {
-      // 防御式地只接收 boolean 值；settings.json 可能被手动编辑过，
-      // 单个错误类型不应该让 loader 崩掉。
       const out: Record<string, boolean> = {}
       for (const [k, v] of Object.entries(obj.enabledPlugins)) {
         if (typeof v === 'boolean') out[k] = v
@@ -79,8 +72,7 @@ async function readSettings(scope: PluginScope, cwd: string): Promise<PluginSett
     return {}
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
-    // JSON 损坏时忽略并返回空设置，避免坏配置阻塞启动；
-    // 用户修好文件后重启即可重新读取。
+
     return {}
   }
 }
@@ -151,8 +143,6 @@ export class EnableState {
   }
 }
 
-// ── 会修改 settings 文件的写操作（供 /plugin enable|disable|install 使用） ──
-
 /**
  * 在指定作用域写入单个插件的启用标记。
  *
@@ -181,7 +171,7 @@ export async function setPluginEnabled(
     const parsed = JSON.parse(raw) as unknown
     if (parsed && typeof parsed === 'object') existing = parsed as Record<string, unknown>
   } catch {
-    // 第一次写入时文件可能还不存在；这不是错误，后面会创建新结构。
+
   }
 
   const currentMap =
