@@ -25,7 +25,7 @@ import { createLoopState } from './loop-state.js'
 import type { LoopState } from './loop-state.js'
 import { runMemoryExtractor } from './memory-extractor.js'
 import { generateTaskSlug, makePlanFilePath } from './plan-storage.js'
-import { downgradeBinaryPartsForProvider, ensureReasoningContentParts } from './provider-compat.js'
+import { downgradeBinaryPartsForProvider } from './provider-compat.js'
 import { appendCheckpoint, appendHeader, appendUsage, flushPendingMessages } from './session-store.js'
 import { createCheckpoint } from './snapshot.js'
 import { drainStreamResult } from './stream-utils.js'
@@ -146,7 +146,6 @@ async function collectTurnResponse(
   // 把消息写回 state ，注意，自动执行工具就是在这里进行 push 操作的，
   // 而手动执行工具，在 runTurn 结束后，processToolCalls 中实现的
   state.messages.push(...response.messages)
-  ensureReasoningContentParts(state.messages, modelId)
 
   const usage = await result.usage
   if (usage) {

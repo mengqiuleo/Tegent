@@ -7,36 +7,11 @@ import type { ModelMessage } from 'ai'
 import { capabilitiesOf } from '../providers/capabilities.js'
 import { ocrImage } from './file-ingest.js'
 
-// 这个文件集中处理 provider 的兼容性差异。核心有两类：
-// 1. 某些模型/SDK 对消息格式有特殊要求，例如 DeepSeek V4 thinking 需要 reasoning_content。
-// 2. 某些 provider 不能接收图片/PDF，就在发请求前把二进制内容降级成 OCR 文本或占位说明。
-
-/**
- * 确保所有 assistant 消息都有 reasoning content part。
- *
- * DeepSeek V4 thinking 模式在工具调用链里要求每条 assistant 消息都有 reasoning_content 字段。
- * 上游 @ai-sdk/deepseek converter 在没有 reasoning part 时会设置 reasoning_content: undefined，
- * 但 JSON.stringify 会剥掉 undefined，导致 DeepSeek API 用 400 报 Missing reasoning_content。
- *
- * 这里给缺 reasoning 的 assistant 消息注入一个空的 `{ type: 'reasoning', text: '' }` part，
- * 这样 converter 最终总能在 JSON body 里产出 `"reasoning_content": ""`。
- */
-export function ensureReasoningContentParts(messages: ModelMessage[], modelId: string): void {
-  if (!modelId.includes('deepseek-v4')) return
-
-  // 原地补 assistant 消息的 reasoning part，让后续 SDK converter 能序列化出空 reasoning_content。
-  for (const msg of messages) {
-    if (msg.role !== 'assistant') continue
-
-    const content = msg.content
-    if (!Array.isArray(content)) continue
-
-    const hasReasoning = (content as Array<{ type: string }>).some((p) => p.type === 'reasoning')
-    if (!hasReasoning) {
-      ;(content as Array<{ type: string; text?: string }>).unshift({ type: 'reasoning', text: '' })
-    }
-  }
-}
+// 这个文件集中处理 provider 的兼容性差异。目前只剩一类：
+// 某些 provider 不能接收图片/PDF，就在发请求前把二进制内容降级成 OCR 文本或占位说明。
+//
+// （历史上的 DeepSeek V4 reasoning_content 注入补丁已移除：升级到 @ai-sdk/deepseek@3.0.37 后，
+//   上游 converter 对 V4 模型会自动产出 `reasoning_content: ""`，覆盖了同样的场景。）
 
 // ---- 针对 text-only provider 的 Image/PDF 降级 ----
 //
