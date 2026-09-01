@@ -107,7 +107,7 @@ export const SLASH_COMMANDS = [
  * - 要求模型用 Edit 合并已有 AGENTS.md，而不是覆盖，
  *   这样用户手写内容在重复执行 /init 时不会丢失。
  */
-export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file at the project root. AGENTS.md is loaded into every TEGENT (\`xc\`) session, so future agents will read it as their primary project context.
+export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file at the project root. AGENTS.md is loaded into every TEGENT session, so future agents will read it as their primary project context.
 
 What to include:
 1. Common commands the agent should prefer: how to build, lint, run tests, run a single test. Only include what's non-obvious from manifest files.

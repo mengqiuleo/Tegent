@@ -64,7 +64,7 @@ export class UnsafeEnvError extends Error {
       `Env key "${key}" is blocked by the MCP env safety check: it is a runtime ` +
         `code-loading hook (NODE_OPTIONS / LD_PRELOAD-class) and would let an MCP ` +
         `config or plugin manifest run arbitrary code at server start. If you ` +
-        `really need this, export it in the shell that launches xc instead.`,
+        `really need this, export it in the shell that launches tegent instead.`,
     )
     this.name = 'UnsafeEnvError'
   }

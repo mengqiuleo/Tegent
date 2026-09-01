@@ -536,8 +536,7 @@ async function readRange(filePath: string, offset: number, length: number): Prom
 
 /** 选择当前项目中最近修改的 session 文件。
  *
- * 如果不存在则返回 null。`xc --continue` / `-c` 用它跳过 picker，
- * 无条件恢复最近一次 session。 */
+ * 如果不存在则返回 null。 无条件恢复最近一次 session。 */
 export async function pickLatestSession(cwd: string = process.cwd()): Promise<SessionListEntry | null> {
   const all = await listSessions(cwd)
   return all[0] ?? null

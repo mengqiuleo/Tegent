@@ -284,7 +284,7 @@ function formatSkillCapabilities(skills: readonly { name: string; description: s
   // 这是给模型看的安装目标路径示例，`<name>` 只是占位符，不是真实目录名。
   const userSkillsDir = path.join(USER_TEGENT_DIR, 'skills', '<name>', 'SKILL.md')
 
-  const installHint = `To install a skill from a URL: use the shell tool to download the raw file directly (e.g. \`Invoke-WebRequest -Uri <url> -OutFile "${userSkillsDir}"\` on Windows, or \`curl -L <url> -o "${userSkillsDir}"\` on macOS/Linux), then confirm the path. Do NOT use webFetch + write — webFetch renders markdown and corrupts YAML frontmatter. Alternatively, use /skill install <url>. After installing, run /skill refresh to load the new skill in this session, or restart xc.`
+  const installHint = `To install a skill from a URL: use the shell tool to download the raw file directly (e.g. \`Invoke-WebRequest -Uri <url> -OutFile "${userSkillsDir}"\` on Windows, or \`curl -L <url> -o "${userSkillsDir}"\` on macOS/Linux), then confirm the path. Do NOT use webFetch + write — webFetch renders markdown and corrupts YAML frontmatter. Alternatively, use /skill install <url>. After installing, run /skill refresh to load the new skill in this session, or restart tegent.`
 
   if (!skills || skills.length === 0) {
     return `\n\n## Skills\n${installHint}`

@@ -210,7 +210,7 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
   /**
    * `/plugin install <source>`：安装插件。
    *
-   * 只接受一个来源参数（`--yes` / `-y` 会被接受但忽略），识别来源类型后
+   * 只接受一个来源参数，识别来源类型后
    * 下载 / 拷贝到缓存目录并读取 manifest。四种来源：
    * 1. `name@marketplace` — 先到已订阅市场的缓存索引里查真实来源
    * 2. `github:owner/repo[#ref]` — GitHub 仓库简写
@@ -239,8 +239,8 @@ export function createPluginCommandHandler(deps: PluginCommandDeps) {
 
     const tokens = raw.trim().split(/\s+/)
     const source_str = tokens[0]!
-    // --yes / -y 被接受但忽略；除此之外的多余参数一律报错
-    const extras = tokens.slice(1).filter((t) => t !== '--yes' && t !== '-y')
+    // 多余参数一律报错
+    const extras = tokens.slice(1)
     if (extras.length > 0) {
       addCommandMessage(
         text,

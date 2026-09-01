@@ -235,7 +235,7 @@ export function classifyApiError(err: unknown): ClassifiedError {
   }
   if (isUnauthorizedError(msg, status)) {
     return {
-      message: 'API authentication failed (401). Please check your API key with /model or reconfigure with `xc init`.',
+      message: 'API authentication failed (401). Please check your API key with /model.',
       retryable: false,
     }
   }

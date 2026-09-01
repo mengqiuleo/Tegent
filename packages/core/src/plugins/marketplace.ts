@@ -547,7 +547,7 @@ async function fetchHttpJson(url: string, signal?: AbortSignal): Promise<string>
  */
 async function fetchViaShallowClone(source: string, signal?: AbortSignal): Promise<string> {
   const cloneUrl = resolveCloneUrl(source)
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'xc-marketplace-'))
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tegent-marketplace-'))
   try {
     await execa('git', ['clone', '--depth', '1', cloneUrl, tempDir], { signal, stdio: 'pipe' })
     const candidates = [

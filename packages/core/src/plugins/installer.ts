@@ -70,8 +70,7 @@ export interface InstallRequest {
    * 安装授权回调。
    *
    * 它在 manifest 解析之后、临时目录移动到缓存之前被调用。返回 false 会中止安装，
-   * 临时目录会被清理，缓存不受影响。未提供时安装不提示直接继续，测试和 CLI
-   * `--yes` 路径会使用这种行为。
+   * 临时目录会被清理，缓存不受影响。未提供时安装不提示直接继续，测试会使用这种行为。
    */
   consent?: (preview: ConsentPreview) => Promise<boolean> | boolean
   /**
@@ -124,7 +123,7 @@ export async function installPlugin(req: InstallRequest): Promise<InstallResult>
       throw new InstallError(
         `strict marketplace mode is enabled (known_marketplaces.json:strictKnownMarketplaces=true) — ` +
           `plugins can only be installed from a subscribed marketplace, but "${req.marketplace}" is not one. ` +
-          `Either subscribe it first (\`xc plugin marketplace add\`) or turn strict mode off.`,
+          `Either subscribe it first (\`/plugin marketplace add\`) or turn strict mode off.`,
       )
     }
   }
