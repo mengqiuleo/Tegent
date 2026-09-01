@@ -10,7 +10,7 @@ import { inputReducer } from './chat-input/reducer.js'
 import type { PermissionRequest, SelectRequest, SlashCommand, SpinnerState } from './chat-input/types.js'
 import { fuzzyMatches, renderMessageLabel, toolPreview, toolStatusColor, truncate } from '../utils/toolkit.js'
 
-/** slash command 菜单最多展示的候选数量，超过后只显示前 N 项。 */
+/** slash command 菜单一次最多渲染的候选行数；更多候选通过上下键滚动访问。 */
 const MAX_VISIBLE_MENU_ITEMS = 8
 /** PageUp/PageDown 每次让光标跨越的逻辑行数。 */
 const MAX_VERTICAL_CURSOR_JUMP = 10
@@ -310,17 +310,31 @@ function CompletionMenu({
 
   if (rows.length === 0) return null
 
+  const visibleStart =
+    rows.length <= MAX_VISIBLE_MENU_ITEMS
+      ? 0
+      : Math.min(Math.max(0, selected - Math.floor(MAX_VISIBLE_MENU_ITEMS / 2)), rows.length - MAX_VISIBLE_MENU_ITEMS)
+  const visibleRows = rows.slice(visibleStart, visibleStart + MAX_VISIBLE_MENU_ITEMS)
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      {/* 菜单只渲染前 MAX_VISIBLE_MENU_ITEMS 项，避免候选过多占满屏幕。 */}
-      {rows.slice(0, MAX_VISIBLE_MENU_ITEMS).map((row, idx) => (
-        <Text key={row.key} color={idx === selected ? 'cyan' : undefined}>
-          {/* 当前选中项用指针提示；其它项前面放空格保持列对齐。 */}
-          {idx === selected ? '❯' : ' '} {row.title}
-          {row.suffix ? <Text color="gray"> {row.suffix}</Text> : null}
-          {row.description ? <Text color="gray"> {row.description}</Text> : null}
-        </Text>
-      ))}
+      {/* 菜单固定高度渲染一个跟随选中项移动的窗口，候选全集仍可被键盘访问。 */}
+      {visibleRows.map((row, idx) => {
+        const rowIndex = visibleStart + idx
+        const hiddenBefore = rowIndex === visibleStart && visibleStart > 0
+        const hiddenAfter =
+          rowIndex === visibleStart + visibleRows.length - 1 && visibleStart + visibleRows.length < rows.length
+        const marker = rowIndex === selected ? '❯' : hiddenBefore ? '↑' : hiddenAfter ? '↓' : ' '
+
+        return (
+          <Text key={row.key} color={rowIndex === selected ? 'cyan' : undefined}>
+            {/* 当前选中项用指针提示；首尾箭头提示菜单还有隐藏候选。 */}
+            {marker} {row.title}
+            {row.suffix ? <Text color="gray"> {row.suffix}</Text> : null}
+            {row.description ? <Text color="gray"> {row.description}</Text> : null}
+          </Text>
+        )
+      })}
     </Box>
   )
 }
@@ -445,8 +459,8 @@ export function ChatInput({
       const filtered = !query
         ? commands
         : commands.filter((cmd) => fuzzyMatches(cmd.name.slice(1).toLowerCase(), query))
-      // 只取前几项，并转换成菜单渲染需要的 CommandMatch。
-      return filtered.slice(0, MAX_VISIBLE_MENU_ITEMS).map((cmd) => ({
+      // 保留所有匹配项；菜单渲染层负责限制可见窗口高度。
+      return filtered.map((cmd) => ({
         name: cmd.name,
         description: cmd.description,
         applyText: cmd.name,
@@ -470,7 +484,7 @@ export function ChatInput({
       ? cmd.subcommands
       : cmd.subcommands.filter((sub) => fuzzyMatches(sub.name.toLowerCase(), query))
     // 子命令接受补全后写回成 `/main sub` 形式。
-    return filtered.slice(0, MAX_VISIBLE_MENU_ITEMS).map((sub) => ({
+    return filtered.map((sub) => ({
       name: sub.name,
       description: sub.description,
       applyText: `${head} ${sub.name}`,
