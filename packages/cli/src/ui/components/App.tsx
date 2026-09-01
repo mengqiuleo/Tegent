@@ -177,7 +177,13 @@ export function App({
   }, [getSessionInfo])
 
   /**
-   * 执行 `/resume`：列出当前项目所有历史会话，并让用户选择一个恢复。
+   * 执行 `/resume [session]`：不带参数时列出当前项目所有历史会话让用户选择；
+   * 带 `<taskSlug>-<sessionId>` 参数时精确匹配并直接恢复，跳过选择器。
+   *
+   * 参数匹配键与退出提示（printResumeHint）、会话文件名主干保持同一拼法：
+   * 有 taskSlug 时是 `<slug>-<sessionId>`，没有时折叠成裸 `sessionId`。
+   * 语义对齐 Claude Code 的 `/resume [session]`：只做精确匹配，不做前缀 /
+   * 模糊匹配 —— 歧义输入宁可报错引导用户打开选择器，也不静默恢复到错误会话。
    *
    * 复用 askQuestion 选择器，也就是 `/model` 和 askUser tool 使用的同一个对话框，
    * 因此天然获得一致的键盘导航、Other 自由输入逃生口和 Esc 取消行为。
@@ -188,7 +194,7 @@ export function App({
    * 热替换 agent 状态。这里包成 useCallback，是为了给挂载 effect 稳定引用，
    * 避免 react-hooks lint 对组件体后方函数声明的闭包新鲜度发出警告。
    */
-  const handleResume = useCallback(async () => {
+  const handleResume = useCallback(async (arg: string) => {
     const sessions = await listSessions()
     if (sessions.length === 0) {
       addInfoMessage(
@@ -196,6 +202,49 @@ export function App({
       )
       return
     }
+
+    // 读取 + 热替换 + 结果提示的公共收尾，选择器路径和参数直达路径共用。
+    const restore = async (filePath: string) => {
+      const loaded = await loadSession(filePath)
+      if (!loaded) {
+        addInfoMessage(`Failed to load session at ${filePath}. The file may be corrupted.`)
+        return
+      }
+      resume(loaded)
+      const hint =
+        compactionHintForResume(
+          loaded.tokenUsage.inputTokens || null,
+          estimateTokenCount(loaded.messages),
+          loaded.modelId,
+        ) ?? ''
+      addInfoMessage(
+        `**Resumed session:** ${loaded.firstPrompt.slice(0, 80) || '(no first prompt)'}\n\nContinuing from ${loaded.messages.length} message${loaded.messages.length === 1 ? '' : 's'}.${hint}`,
+      )
+    }
+
+    // 参数直达路径：精确匹配退出提示打印的 session 标识（`<slug>-<sessionId>`
+    // 或裸 sessionId）。0 命中 / 多命中的文案对齐 Claude Code —— 报错并
+    // 引导用户用无参 /resume 打开选择器。
+    if (arg) {
+      const hits = sessions.filter(
+        (s) => (s.taskSlug ? `${s.taskSlug}-${s.sessionId}` : s.sessionId) === arg || s.sessionId === arg,
+      )
+      if (hits.length === 1) {
+        await restore(hits[0]!.filePath)
+        return
+      }
+      if (hits.length === 0) {
+        addInfoMessage(
+          `No conversation found with session ID: \`${arg}\`. Run \`/resume\` without arguments to pick from the list.`,
+        )
+        return
+      }
+      addInfoMessage(
+        `Ambiguous session \`${arg}\` (${hits.length} matches). Run \`/resume\` without arguments to pick from the list.`,
+      )
+      return
+    }
+
     const choices = sessions.slice(0, 30).map((s) => {
       const preview = (s.firstPrompt || '(empty)').slice(0, 60).replace(/\s+/g, ' ').trim()
       const ago = formatRelativeTime(s.mtime)
@@ -213,25 +262,11 @@ export function App({
     const picked = choices.find((c) => c.label === answer)
     if (!picked) {
       // 用户在 Other 里输入了自由文本时，这里按取消处理。
-      // 不对 session id 做模糊匹配；当前支持的选择方式就是 picker。
+      // 不对 session id 做模糊匹配；参数直达路径见上方精确匹配分支。
       addInfoMessage('Resume cancelled.')
       return
     }
-    const loaded = await loadSession(picked.filePath)
-    if (!loaded) {
-      addInfoMessage(`Failed to load session at ${picked.filePath}. The file may be corrupted.`)
-      return
-    }
-    resume(loaded)
-    const hint =
-      compactionHintForResume(
-        loaded.tokenUsage.inputTokens || null,
-        estimateTokenCount(loaded.messages),
-        loaded.modelId,
-      ) ?? ''
-    addInfoMessage(
-      `**Resumed session:** ${loaded.firstPrompt.slice(0, 80) || '(no first prompt)'}\n\nContinuing from ${loaded.messages.length} message${loaded.messages.length === 1 ? '' : 's'}.${hint}`,
-    )
+    await restore(picked.filePath)
   }, [addInfoMessage, askQuestion, resume])
 
   /**
@@ -356,7 +391,7 @@ export function App({
 
         case 'resume':
           echoCommand(text)
-          await handleResume()
+          await handleResume(arg)
           return
 
         case 'rewind':
