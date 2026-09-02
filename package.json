@@ -8,6 +8,7 @@
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
     "test": "pnpm -r test",
+    "eval": "pnpm --filter @tegent/core eval",
     "start": "pnpm --filter @tegent/cli start"
   },
   "keywords": [],

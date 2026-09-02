@@ -15,7 +15,8 @@
     "dev": "tsc -b --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "tsx evals/run.ts"
   },
   "dependencies": {
     "@ai-sdk/alibaba": "^2.0.34",
