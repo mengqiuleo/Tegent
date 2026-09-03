@@ -178,13 +178,13 @@ pnpm eval -- --task fix-test --model deepseek:deepseek-chat
 根目录 `package.json`：
 
 ```json
-"eval": "pnpm --filter @tegent/core eval"
+"eval": "pnpm --filter @tegent/evals eval"
 ```
 
-它进入 core 包，执行：
+它进入 evals 包，执行：
 
 ```json
-"eval": "tsx evals/run.ts"
+"eval": "tsx src/run-vitest.ts"
 ```
 
 ### 2. 读取配置和模型
@@ -201,7 +201,7 @@ pnpm eval -- --task fix-test --model deepseek:deepseek-chat
 代码读取：
 
 ```text
-packages/core/evals/tasks.jsonl
+packages/evals/tasks.jsonl
 ```
 
 每一行都是一道独立题目。
@@ -330,7 +330,7 @@ success: checks.every(...) && trace.errors.length === 0
 结果写入：
 
 ```text
-packages/core/evals/results/时间.json
+packages/evals/results/时间.json
 ```
 
 里面包含：
@@ -348,21 +348,67 @@ packages/core/evals/results/时间.json
 
 ## 三、每个文件是做什么的
 
-### `packages/core/evals/run.ts`
+### `packages/evals/src/run-vitest.ts`
 
-评测系统的主程序，负责：
+默认评测入口，负责：
+
+- 解析 `--model`、`--task`、`--max-turns`、`--keep`
+- 设置 `TEGENT_EVAL_*` 环境变量
+- 启动 Vitest
+- 使用 `vitest-evals/reporter` 输出报告
+
+### `packages/evals/evals/coding.eval.ts`
+
+真实 agent 行为评测定义，使用 `describeEval()` 把 Tegent harness 接入 Vitest。
+
+### `packages/evals/src/vitest-harness.ts`
+
+`vitest-evals` 适配器，负责把 `TegentCodingAgentHarness` 的结果转换成 `HarnessRun`：
+
+- `output`：结构化评测结果
+- `session.events`：用户消息、工具调用、工具结果、最终回答
+- `usage`：token 和工具调用数量
+- `traces`：agent/span 信息
+- `artifacts`：checks、changedFiles、workspacePath 等调试数据
+
+### `packages/evals/src/run.ts`
+
+旧的手写 JSONL runner，保留给学习和调试用。默认 `pnpm eval` 不再走这个文件；要运行它，用：
+
+```bash
+pnpm --filter @tegent/evals eval:jsonl
+```
+
+它负责：
 
 - 读取参数
 - 加载任务
-- 创建临时目录
-- 启动 Agent
-- 收集 Trace
-- 执行 Checks
+- 创建模型和 harness
 - 输出结果
 
-它相当于“考场管理员 + 评分系统”。
+它相当于旧版“考场管理员”。
 
-### `packages/core/evals/tasks.jsonl`
+### `packages/evals/src/tegent-harness.ts`
+
+Tegent agent 的评测适配器，负责：
+
+- 创建临时工作区
+- 启动 `agentLoop`
+- 收集 Trace
+- 执行 Checks
+- 返回 `EvalResult`
+
+它相当于把真实 Agent 接进评测系统的“考试接口”。
+
+### `packages/evals/src/checks.ts`
+
+评分器，负责执行 `answerContains`、`fileEquals`、`jsonPathEquals`、`command` 和 `onlyFiles`。
+
+### `packages/evals/src/workspace.ts`
+
+临时工作区工具，负责复制 fixtures、计算文件 hash、判断哪些文件被修改。
+
+### `packages/evals/tasks.jsonl`
 
 题库。
 
@@ -374,26 +420,26 @@ packages/core/evals/results/时间.json
 - `fix-test`：修复代码并通过测试
 - `scope-control`：只修改允许的文件
 
-### `packages/core/evals/fixtures/`
+### `packages/evals/fixtures/`
 
 每道题的初始项目文件。
 
 例如：
 
 ```text
-fixtures/fix-test/math.mjs
-fixtures/fix-test/verify.mjs
+packages/evals/fixtures/fix-test/math.mjs
+packages/evals/fixtures/fix-test/verify.mjs
 ```
 
 它们组成 Agent 开始工作时看到的项目状态。
 
-### `packages/core/evals/tsconfig.json`
+### `packages/evals/tsconfig.json`
 
 只用于检查 eval 代码本身的 TypeScript 类型。
 
 它不会改变正式 core 构建结构。
 
-### `packages/core/evals/results/`
+### `packages/evals/results/`
 
 保存每次评测的 JSON 结果。
 
@@ -407,12 +453,12 @@ fixtures/fix-test/verify.mjs
 pnpm eval
 ```
 
-### `packages/core/package.json`
+### `packages/evals/package.json`
 
-新增 core 包内部命令：
+新增 evals 包内部命令：
 
 ```bash
-tsx evals/run.ts
+tsx src/run-vitest.ts
 ```
 
 ## 四、当前实现的限制

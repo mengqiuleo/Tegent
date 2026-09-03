@@ -2,10 +2,11 @@
 
 ## Project Structure & Module Organization
 
-Tegent is a pnpm workspace with two TypeScript packages:
+Tegent is a pnpm workspace with three TypeScript packages:
 
 - `packages/core/src/` contains the agent loop, providers, tools, MCP, plugins, skills, permissions, and shared types.
 - `packages/cli/src/` contains the Ink terminal UI and command handlers; `packages/cli/bin/tegent.js` is the packaged entry point.
+- `packages/evals/` contains the offline agent eval harness, tasks, fixtures, and ignored result files.
 - `packages/core/tests/` contains Vitest tests; `smoke.ts` is a manual provider integration script.
 - Root `tsconfig.json` coordinates project references.
 
@@ -16,7 +17,7 @@ Keep changes in the owning package and use existing folders and module boundarie
 Run these from the repository root:
 
 - `pnpm install` installs workspace dependencies using the pinned pnpm version (`10.33.1`).
-- `pnpm build` builds both packages recursively.
+- `pnpm build` builds all workspace packages recursively.
 - `pnpm test` runs all configured tests recursively.
 - `pnpm dev` builds `@tegent/core` and starts the CLI in development mode.
 - `pnpm start` runs the built CLI.
@@ -27,7 +28,7 @@ Use `pnpm clean` to remove package build output.
 
 ## Eval Workflow
 
-The eval suite lives in `packages/core/evals/`. Configure a provider key in the root `.env`, then run `pnpm eval`. Use `pnpm eval -- --task fix-test --model deepseek:deepseek-chat` to run one task, or add `--keep` to preserve its temporary workspace. Add JSONL tasks to `packages/core/evals/tasks.jsonl`; use fixtures and checks for expected answers, file contents, JSON fields, commands, or allowed changes. Results go to ignored `packages/core/evals/results/`.
+The eval suite lives in the standalone `packages/evals/` workspace package. Configure a provider key in the root `.env`, then run `pnpm eval`; this invokes Vitest through `vitest-evals`. Use `pnpm eval -- --task fix-test --model deepseek:deepseek-chat` to run one task, or add `--keep` to preserve its temporary workspace. Add JSONL tasks to `packages/evals/tasks.jsonl`; use fixtures and checks for expected answers, file contents, JSON fields, commands, or allowed changes. Harness tests live under `packages/evals/test/vitest-evals/` and run with `pnpm --filter @tegent/evals test`. Use `pnpm --filter @tegent/evals eval:jsonl` only for the legacy hand-written runner. Results go to ignored `packages/evals/results/`.
 
 ## Coding Style & Naming Conventions
 
