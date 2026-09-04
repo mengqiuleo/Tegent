@@ -151,3 +151,5 @@ vite.config.ts.timestamp-*
 .tegent/*
 packages/cli/.tegent/*
 !packages/cli/.tegent/plugins/
+packages/evals/results/*
+!packages/evals/results/.gitkeep
