@@ -2,6 +2,11 @@
   "name": "@tegent/cli",
   "version": "0.0.1",
   "type": "module",
+  "author": {
+    "name": "mengqiuleo"
+  },
+  "description": "运行在终端的 AI 助手",
+  "license": "MIT",
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -18,11 +23,20 @@
   "bin": {
     "tegent": "./bin/tegent.js"
   },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
-    "start": "node bin/tegent.js"
+    "start": "node bin/tegent.js",
+    "prepack": "cp ../../README.md ./README.md",
+    "postpack": "rm -f ./README.md"
   },
   "dependencies": {
     "@npmcli/disparity-colors": "^3.0.1",

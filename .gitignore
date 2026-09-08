@@ -153,3 +153,6 @@ packages/cli/.tegent/*
 !packages/cli/.tegent/plugins/
 packages/evals/results/*
 !packages/evals/results/.gitkeep
+
+# @tegent/cli 发布时由 prepack 临时从根目录复制的 README，不应提交
+packages/cli/README.md

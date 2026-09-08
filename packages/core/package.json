@@ -8,6 +8,22 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "author": {
+    "name": "mengqiuleo"
+  },
+  "description": "@tegent/cli 的底层核心逻辑在此独立封装",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mengqiuleo/Tegent",
+    "directory": "packages/core"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
