@@ -8,6 +8,11 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mengqiuleo/Tegent",
+    "directory": "packages/cli"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
