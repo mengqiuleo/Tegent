@@ -1,6 +1,6 @@
 {
   "name": "@tegent/cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "author": {
     "name": "mengqiuleo"
@@ -25,6 +25,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "bin"
   ],
   "publishConfig": {
